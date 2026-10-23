@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": ["mcp__workspace"],
+    "deny": ["Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep",
+             "WebFetch", "WebSearch", "Task", "NotebookEdit"],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "allowManagedPermissionRulesOnly": true,
+  "allowManagedHooksOnly": true,
+  "env": {
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1"
+  }
+}
