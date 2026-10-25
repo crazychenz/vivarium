@@ -8,7 +8,9 @@ description = "Structured Dockerfile Generation"
 # Note: No idea the real version required at this time.
 requires-python = ">=3.9"
 
-dependencies = []
+dependencies = [
+    "pydantic",
+]
 
 # Requires PEP 621 (setuptools>=61)
 dynamic = ["version"]

@@ -1,2 +1,0 @@
-[console_scripts]
-vivarium = thirdparty.vivarium.cli:main

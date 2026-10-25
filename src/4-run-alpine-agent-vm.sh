@@ -44,4 +44,5 @@ doas -u root ip link set dev eth1 mtu 1400
 doas -u root ip addr add 10.0.0.1/24 dev eth1
 doas -u root ip link set dev eth1 up
 doas -u root ip route add default via 10.0.0.254
+doas -u root ash -c 'echo "nameserver 10.0.0.53" > /etc/resolv.conf'
 nslookup example.com 10.0.0.53

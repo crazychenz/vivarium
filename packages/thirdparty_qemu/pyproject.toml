@@ -8,11 +8,16 @@ description = "Qemu Management"
 # Note: No idea the real version required at this time.
 requires-python = ">=3.9"
 
+# TODO: Consider forking cloud-init's cloudinit/config/schemas
+# TODO: folder to do our own schema check. For now we're going
+# TODO: to wing it.
 dependencies = [
     "argcomplete",
     "pyyaml",
-    "git+https://github.com/canonical/cloud-init.git",
+    "pydantic",
 ]
+
+# developer dependency: datamodel-code-generator
 
 # Requires PEP 621 (setuptools>=61)
 dynamic = ["version"]

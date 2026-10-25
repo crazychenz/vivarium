@@ -8,12 +8,10 @@ description = "Agent Sandboxing"
 # Note: No idea the real version required at this time.
 requires-python = ">=3.9"
 
-# TODO: Consider forking cloud-init's cloudinit/config/schemas
-# TODO: folder to do our own schema check. For now we're going
-# TODO: to wing it.
 dependencies = [
     "argcomplete",
     "pyyaml",
+    "thirdparty-qemu",
 ]
 
 # Requires PEP 621 (setuptools>=61)
