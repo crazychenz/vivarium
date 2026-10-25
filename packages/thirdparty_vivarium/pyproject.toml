@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thirdparty-vivarium"
+description = "Agent Sandboxing"
+# Note: No idea the real version required at this time.
+requires-python = ">=3.9"
+
+# TODO: Consider forking cloud-init's cloudinit/config/schemas
+# TODO: folder to do our own schema check. For now we're going
+# TODO: to wing it.
+dependencies = [
+    "argcomplete",
+    "pyyaml",
+]
+
+# Requires PEP 621 (setuptools>=61)
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = true
+
+[project.scripts]
+vivarium = "thirdparty.vivarium.cli:main"
+

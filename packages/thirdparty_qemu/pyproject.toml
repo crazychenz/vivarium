@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thirdparty-qemu"
+description = "Qemu Management"
+# Note: No idea the real version required at this time.
+requires-python = ">=3.9"
+
+dependencies = [
+    "argcomplete",
+    "pyyaml",
+    "git+https://github.com/canonical/cloud-init.git",
+]
+
+# Requires PEP 621 (setuptools>=61)
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = true
+
+

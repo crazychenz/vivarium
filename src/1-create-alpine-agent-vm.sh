@@ -63,7 +63,7 @@ runcmd:
   - addgroup agent docker
   - rc-update add docker default
   - rc-service docker start
-  - docker build -t agent:latest /opt/agent-image
+  - #docker build -t agent:latest /opt/agent-image
   - addgroup agent wheel
   - echo 'permit nopass :wheel' > /etc/doas.d/doas.conf
 power_state:
@@ -93,7 +93,8 @@ mcopy -i alpine-agent-seed.img $HOME/.mitmproxy/mitmproxy-ca-cert.pem ::mitmprox
 
 # Alpine Agent
 qemu-img create -q -f qcow2 -F qcow2 -b "alpine-3.24.2-x86_64-cloudinit-r2.qcow2" "alpine-agent-golden.qcow2" 10G
-"qemu-system-x86_64" \
+
+qemu-system-x86_64 \
   -M microvm,acpi=off -no-reboot \
   -enable-kvm -cpu host -m "2G" -smp "2" \
   -kernel "alpine-boot/vmlinuz-virt" -initrd "alpine-boot/initramfs-virt" \
@@ -105,11 +106,12 @@ qemu-img create -q -f qcow2 -F qcow2 -b "alpine-3.24.2-x86_64-cloudinit-r2.qcow2
   -device virtio-blk-device,drive=root \
   -drive "id=seed,file=alpine-agent-seed.img,format=raw,if=none,readonly=on" \
   -device virtio-blk-device,drive=seed \
-  -netdev "user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22" -device virtio-net-device,netdev=n0 \
+  -netdev "user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22" -device virtio-net-device,netdev=n0 \
   -device virtio-rng-device \
   -pidfile "./state/run/alpine-agent.pid" -daemonize \
   -sandbox on
-# tail -f state/log/agent.console.log
+
+# tail -f state/log/alpine-agent.console.log
 
 # qemu-img create -q -f qcow2 -F qcow2 -b "alpine-agent-golden.qcow2" "alpine-agent.qcow2"
 

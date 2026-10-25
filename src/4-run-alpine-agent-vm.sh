@@ -19,11 +19,29 @@ rm -rf alpine-agent.qcow2 && qemu-img create -q -f qcow2 -F qcow2 -b "alpine-age
   -device virtio-blk-device,drive=root \
   -drive "id=seed,file=alpine-agent-seed.img,format=raw,if=none,readonly=on" \
   -device virtio-blk-device,drive=seed \
-  -netdev "user,id=n0,restrict=on,hostfwd=tcp:127.0.0.1:2223-:22,guestfwd=tcp:10.0.2.100:9000-cmd:socat - TCP:127.0.0.1:9000,guestfwd=tcp:10.0.2.101:3128-cmd:socat - TCP:127.0.0.1:3128" -device virtio-net-device,netdev=n0 \
   -device virtio-rng-device \
-  -pidfile "./state/run/alpine-agent.pid" -daemonize \
-  -sandbox on
+  -netdev "user,id=mgmt,restrict=on,hostfwd=tcp:127.0.0.1:2222-:22" \
+  -device "virtio-net-device,netdev=mgmt,mac=52:54:00:aa:00:02" \
+  -netdev "dgram,id=tunnel,local.type=unix,local.path=state/run/qemu.sock,remote.type=unix,remote.path=state/run/bridge.sock" \
+  -device "virtio-net-device,netdev=tunnel,mac=52:54:00:aa:00:01" \
+  -pidfile "./state/run/alpine-agent.pid"
+  
 echo tail -f state/log/alpine-agent.console.log
 
+# -daemonize
+
+# -sandbox on
+
+# -netdev "user,id=n0,restrict=on,hostfwd=tcp:127.0.0.1:2223-:22,guestfwd=tcp:10.0.2.100:9000-cmd:socat - TCP:127.0.0.1:9000,guestfwd=tcp:10.0.2.101:3128-cmd:socat - TCP:127.0.0.1:3128" -device virtio-net-device,netdev=n0 \
+
+# -object "rng-random,id=rng0,filename=/dev/urandom" -device "virtio-rng-pci,rng=rng0"
 
 
+
+exit 0
+
+doas -u root ip link set dev eth1 mtu 1400
+doas -u root ip addr add 10.0.0.1/24 dev eth1
+doas -u root ip link set dev eth1 up
+doas -u root ip route add default via 10.0.0.254
+nslookup example.com 10.0.0.53
