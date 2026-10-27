@@ -224,7 +224,7 @@ power_state:
 
 
 def build_cloud_config():
-    import thirdparty.qemu.cloud_init.lib as cc
+    import thirdparty.qemu.cloud_init.cloud_config as cc
 
     user_data = cc.CloudConfig(
         disable_root=False,
@@ -400,9 +400,13 @@ class VivariumDeployment:
         mcpg_path = deployment_path / 'mcpg' / 'default'
         enclosure_vm_path = deployment_path / 'vm' / 'enclosure' / 'default'
 
+        # TODO: Each of these should be a class.
         components = [mitm_path, agent_vm_path, mcpg_path, enclosure_vm_path]
         for comp in components:
             for sub in ['config', 'keys', 'run', 'logs']:
+                (comp / sub).mkdir(parents=True, exist_ok=True)
+        for comp in [agent_vm_path, enclosure_vm_path]:
+            for sub in ['import']:
                 (comp / sub).mkdir(parents=True, exist_ok=True)
 
         '''
@@ -447,7 +451,28 @@ class VivariumDeployment:
         user_data_yaml = to_yaml(user_data)
         print(user_data_yaml)
 
+        # --------------------------------------------------
         #   TODO: create seed folder (include certs, keys, binaries) -> ISO 
+        import shutil
+        import libvirt
+        import pycdlib
+
+        # BASE_DIR/deployments/<name>/vm/agent/default/import
+        agent_vm_import_path = agent_vm_path / "import"
+        
+        shutil.copy2(
+            mitm_config_path / "mitmproxy-ca-cert.pem",
+            agent_vm_import_path / "mitmproxy-ca-cert.pem"
+        )
+
+        shutil.copytree(
+            agent_vm_path / "keys",
+            agent_vm_import_path,
+            dirs_exist_ok=True
+        )
+
+
+        # --------------------------------------------------
         #   TODO: download os ISO if not cached
         #   TODO: provision VM with seed ISO
 

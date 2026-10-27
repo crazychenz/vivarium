@@ -10,7 +10,7 @@ from enum import Enum
 from typing import Annotated, Any
 
 from pydantic import AnyUrl, ConfigDict, Field, RootModel, StringConstraints
-from thirdparty.qemu.cloud_init.base import CloudBase
+from .base import CloudBase
 from typing_extensions import TypeAliasType
 
 

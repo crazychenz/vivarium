@@ -11,6 +11,8 @@ requires-python = ">=3.9"
 dependencies = [
     "argcomplete",
     "pyyaml",
+    "pycdlib",
+    "libvirt",
     "thirdparty-qemu",
 ]
 
