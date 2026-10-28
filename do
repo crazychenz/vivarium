@@ -29,8 +29,8 @@ fi
 
 for pkg in pyyaml jinja2; do
     if ! $PIP show "$pkg" &>/dev/null; then
-        echo "\`do\` script missing Python package: $pkg"
-        echo "Please run: \`pip install pyyaml\` or install with pkg manager"
+        echo "'do' script missing Python package: $pkg"
+        echo "Please run: 'pip install pyyaml' or install with pkg manager"
         exit 1
     fi
 done

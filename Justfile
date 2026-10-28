@@ -18,6 +18,8 @@ bundle DURATION="":
 #    ./docs/builders/docusaurus/build-docs.sh
 
 devinstall:
+    # For now we pull from trunk until the Python 3.14 fix is versioned.
+    pip install -U "git+https://github.com/fox-it/dissect.target.git@main"
     pip install -U -r requirements.txt
     pip install -U -e ./packages/thirdparty_qemu
     pip install -U -e ./packages/thirdparty_dockerfile
@@ -27,3 +29,6 @@ devinstall:
 #    pip install -U -e ./packages/thirdparty_jdwp
 #    pip install -U -e ./packages/thirdparty_android
 #    pip install -U -e ./packages/thirdparty_apkd
+
+
+# alias iso_ls='7z l ' && alias iso_cat='7z x -so '

@@ -2,6 +2,144 @@
 import os
 from pathlib import Path
 
+import thirdparty.qemu.qapi as qapi
+
+
+# APPEND = ("root=LABEL=/ rootfstype=ext4 rw console=ttyS0 reboot=k panic=1 "
+#           "modules=virtio_mmio,virtio_blk,virtio_net,ext4 reboot=t")
+
+
+# def common(**overrides) -> dict:
+#     return dict(
+#         machine=qapi.MicroVM(acpi=False),
+#         no_reboot=True,
+#         enable_kvm=True, cpu="host", memory="2G", smp=2,
+#         kernel="alpine-boot/vmlinuz-virt", initrd="alpine-boot/initramfs-virt",
+#         append=APPEND,
+#         nodefaults=True, no_user_config=True, display="none",
+#         serial=[qapi.ChardevFile(path="./state/log/alpine-agent.console.log")],
+#         qmp=[qapi.ChardevSocket(path="./state/run/alpine-agent.qmp", server=True, wait=False)],
+#         pidfile="./state/run/alpine-agent.pid",
+#         **overrides,
+#     )
+
+
+# def golden_command():
+#     return qapi.QemuCommand(
+#         **common(daemonize=True, sandbox=True),
+#         drives=[
+#             qapi.Drive(id="root", file="alpine-agent-golden.qcow2", format="qcow2", interface="none"),
+#             qapi.Drive(id="seed", file="alpine-agent-seed.img", format="raw", interface="none", readonly=True),
+#         ],
+#         netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=2222, guest_port=22)])],
+#         devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
+#     )
+
+
+# def tunnel_command():
+#     return qapi.QemuCommand(
+#         **common(),
+#         drives=[
+#             qapi.Drive(id="root", file="alpine-agent.qcow2", format="qcow2", interface="none"),
+#             qapi.Drive(id="seed", file="alpine-agent-seed.img", format="raw", interface="none", readonly=True),
+#         ],
+#         netdevs=[
+#             qapi.NetdevUser(id="mgmt", restrict=True, hostfwd=["tcp:127.0.0.1:2222-:22"]),
+#             qapi.NetdevDgram(id="tunnel",
+#                         local=qapi.UnixSocketAddress(path="state/run/qemu.sock"),
+#                         remote=qapi.UnixSocketAddress(path="state/run/bridge.sock")),
+#         ],
+#         devices=[
+#             qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioRng(),
+#             qapi.VirtioNet(netdev="mgmt", mac="52:54:00:aa:00:02"),
+#             qapi.VirtioNet(netdev="tunnel", mac="52:54:00:aa:00:01"),
+#         ],
+#     )
+
+
+
+# import guestfs
+# from pathlib import Path
+# from typing import Iterable
+
+# def libguestfs_extract_files(image: Path, guest_paths: Iterable[str], dest_dir: Path, *,
+#                   appliance_path: Path | None = None, fmt: str = "qcow2", overwrite: bool = False) -> list[Path]:
+#     """Copy files or directories out of a disk image into dest_dir (like virt-copy-out).
+
+#     Each guest path keeps its base name: "/boot/vmlinuz-virt" -> dest_dir/vmlinuz-virt.
+#     Returns the paths of the extracted items.
+#     """
+#     guest_paths = list(guest_paths)
+#     dest_dir.mkdir(parents=True, exist_ok=True)
+#     targets = {gp: dest_dir / Path(gp).name for gp in guest_paths}
+
+#     todo = [gp for gp, t in targets.items() if overwrite or not t.exists()]
+#     if todo:
+#         g = guestfs.GuestFS(python_return_dict=True)
+#         try:
+#             if appliance_path:
+#                 g.set_path(appliance_path)
+#                 g.set_backend("direct") 
+#                 g.set_backend_setting("force_tcg", "1")
+#             g.add_drive_opts(str(image), readonly=1, format=fmt)
+#             g.launch()
+#             roots = g.inspect_os()
+#             if roots:
+#                 # mount the whole OS tree (handles separate /boot etc.)
+#                 for mountpoint, device in sorted(g.inspect_get_mountpoints(roots[0]).items(),
+#                                                  key=lambda kv: len(kv[0])):
+#                     g.mount_ro(device, mountpoint)
+#             else:
+#                 fs = next(d for d, t in g.list_filesystems().items() if t not in ("unknown", "swap"))
+#                 g.mount_ro(fs, "/")
+
+#             for gp in todo:
+#                 if not g.exists(gp):
+#                     raise FileNotFoundError(f"{gp} not found in {image}")
+#                 target = targets[gp]
+#                 if target.exists() and overwrite:
+#                     if target.is_dir():
+#                         import shutil; shutil.rmtree(target)
+#                     else:
+#                         target.unlink()
+#                 g.copy_out(gp, str(dest_dir))      # works for files and directories
+#         finally:
+#             g.close()
+
+#     return list(targets.values())
+
+
+
+import shutil
+from pathlib import Path
+ 
+from dissect.target import Target
+ 
+ 
+def extract_files(image, files, dest):
+    """Copy `files` (paths inside the image, e.g. "/boot/vmlinuz-lts") from a
+    qcow2 into `dest`, flattened to their base names. Returns the local paths."""
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    out = []
+ 
+    target = Target.open(image)
+    try:
+        for f in files:
+            src = target.fs.path(f)
+            if not src.is_file():
+                raise FileNotFoundError(f"{f} not found in {image}")
+            dst = dest / src.name
+            with src.open("rb") as fin, dst.open("wb") as fout:
+                shutil.copyfileobj(fin, fout, 1024 * 1024)
+            out.append(dst)
+    finally:
+        target.close()
+ 
+    return out
+
+
+
 
 def generate_ssh_keys(dest, comment='user@host'):
     from pathlib import Path
@@ -171,7 +309,7 @@ def build_dockerfile(proxy_mode = "wireguard", agent_type = "none"):
     return dockerfile
 
 
-'''
+r'''
 #cloud-config
 disable_root: false
 ssh_pwauth: true
@@ -377,6 +515,11 @@ class VivariumDeployment:
         print("vivarium deployment ls not implemented")
         print(f"base_dir = {base_dir}")
 
+        p = Path(base_dir / "deployments")
+        names = [d.name for d in p.iterdir() if d.is_dir()]
+        for name in names:
+            print(name)
+
 
     @staticmethod
     def deployment_init_func(args, config):
@@ -445,17 +588,22 @@ class VivariumDeployment:
         #dockerfile.build("wgtest", ctx_path="context")
 
         # create cloud-init data in code
-        from thirdparty.qemu.cloud_init import to_yaml
+        from thirdparty.qemu.cloud_init.cloud_config import to_yaml
         user_data = build_cloud_config()
         #user_data_yaml = yaml.safe_dump(user_data.model_dump(exclude_none=True, by_alias=True))
         user_data_yaml = to_yaml(user_data)
         print(user_data_yaml)
 
+        import time
+        meta_data = \
+            f"instance-id: agent-host-{int(time.time())}\n" \
+            "local-hostname: agent-host\n"
+
         # --------------------------------------------------
         #   TODO: create seed folder (include certs, keys, binaries) -> ISO 
         import shutil
-        import libvirt
-        import pycdlib
+        # Not yet installed
+        #import libvirt
 
         # BASE_DIR/deployments/<name>/vm/agent/default/import
         agent_vm_import_path = agent_vm_path / "import"
@@ -471,10 +619,87 @@ class VivariumDeployment:
             dirs_exist_ok=True
         )
 
+        from thirdparty.qemu.cloud_init import make_seed
+
+        make_seed(path=(agent_vm_path / "seed.iso"), user_data=user_data_yaml, meta_data=meta_data, tree=agent_vm_import_path)
 
         # --------------------------------------------------
-        #   TODO: download os ISO if not cached
-        #   TODO: provision VM with seed ISO
+        alpine_cloudinit_dest_path = base_dir / "cache" / "downloads" / "alpine-3.24.2-x86_64-cloudinit-r2.qcow2"
+
+        # download os ISO if not cached
+        if not dest_path.exists():
+            from thirdparty.vivarium.util import download_with_progress
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            download_with_progress(
+                url="https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/cloud/alpine-3.24.2-x86_64-cloudinit-r2.qcow2",
+                dest_path=alpine_cloudinit_dest_path,
+            )
+
+        # TODO: if alpine, we must extract kernel and init
+
+        ligguestfs_app_dest_path = base_dir / "cache" / "downloads" / "appliance-1.58.1.tar.xz"
+        # download os ISO if not cached
+        if not ligguestfs_app_dest_path.exists():
+            from thirdparty.vivarium.util import download_with_progress
+            ligguestfs_app_dest_path.parent.mkdir(parents=True, exist_ok=True)
+            download_with_progress(
+                url="https://download.libguestfs.org/binaries/appliance/appliance-1.58.1.tar.xz",
+                dest_path=ligguestfs_app_dest_path,
+            )
+
+        # libguestfs_extract_files(
+        #     alpine_cloudinit_dest_path, 
+        #     ["/boot/vmlinuz-virt", "/boot/initramfs-virt"],
+        #     agent_vm_path,
+        #     appliance_path=ligguestfs_app_dest_path,
+        # )
+
+        extract_files(alpine_cloudinit_dest_path, ["/boot/vmlinuz-virt", "/boot/initramfs-virt"], agent_vm_path)
+
+
+        # provision VM with seed ISO
+        kernel_modules = ','.join([
+            "virtio_mmio",
+            "virtio_blk",
+            "virtio_net",
+            "ext4",
+        ])
+        kernel_root = "LABEL=/"
+        kernel_rootfstype = "ext4"
+        kernel_cmdline = ' '.join([
+            f"root={kernel_root}",
+            f"rootfstype={kernel_rootfstype}",
+            "rw",
+            "console=ttyS0",
+            "panic=1",
+            f"modules={kernel_modules}",
+            "reboot=t", #"reboot=k",
+        ])
+
+
+        qemu_cmd_obj = qapi.QemuCommand(
+            # --- common ---
+            machine=qapi.MicroVM(acpi=False),
+            no_reboot=True,
+            enable_kvm=True, cpu="host", memory="2G", smp=2,
+            kernel="alpine-boot/vmlinuz-virt", initrd="alpine-boot/initramfs-virt",
+            append=kernel_cmdline,
+            nodefaults=True, no_user_config=True, display="none",
+            serial=[qapi.ChardevFile(path="./state/log/alpine-agent.console.log")],
+            qmp=[qapi.ChardevSocket(path="./state/run/alpine-agent.qmp", server=True, wait=False)],
+            pidfile="./state/run/alpine-agent.pid",
+            daemonize=True,
+            sandbox=True,
+            # --- use case specific ---
+            drives=[
+                qapi.Drive(id="root", file="alpine-agent-golden.qcow2", format="qcow2", interface="none"),
+                qapi.Drive(id="seed", file="alpine-agent-seed.img", format="raw", interface="none", readonly=True),
+            ],
+            netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=2222, guest_port=22)])],
+            devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
+        )
+
+        print(f"qemu command: {qemu_cmd_obj.to_shell()}")
 
         # TODO: creates enclosure vm
         #   TODO: create dockerfile in code
@@ -489,11 +714,30 @@ class VivariumDeployment:
     @staticmethod
     def deployment_rm_func(args, config):
         from thirdparty.vivarium.config import resolve_base_dir
+        import shutil
         base_dir = resolve_base_dir(config)
+        deployments_dir = base_dir / "deployments"
 
         print("vivarium deployment rm not implemented")
         print(f"name = {args.deployment_name}")
         print(f"base_dir = {base_dir}")
+
+        target = (deployments_dir / args.deployment_name).resolve()
+        base = base_dir.resolve()
+
+        # safety: must be a real directory strictly inside base_dir
+        if target == base or base not in target.parents:
+            raise ValueError(f"refusing to remove {target}: not inside {base}")
+        if not target.is_dir() or target.is_symlink():
+            print(f"{target} is not a directory")
+            exit(1) #return False
+        if input(f"Delete {target} and everything in it? [y/N] ").strip().lower() != "y":
+            print("aborted")
+            exit(0) #return False
+        
+        shutil.rmtree(target)
+        print(f"removed {args.deployment_name}")
+        #return True
 
 
     @staticmethod

@@ -12,8 +12,10 @@ dependencies = [
     "argcomplete",
     "pyyaml",
     "pycdlib",
-    "libvirt",
+    #"libvirt-python",
+    "dissect.target",
     "thirdparty-qemu",
+    "thirdparty-dockerfile"
 ]
 
 # Requires PEP 621 (setuptools>=61)
