@@ -40,6 +40,8 @@ from .net import (
     NetdevDgram, NetdevSocket, NetdevStream, NetdevTap, NetdevUser, NetdevVhostUser, SocketAddress,
     UnixSocketAddress,
 )
-from .objects import AnyObject, MemoryBackendFile, MemoryBackendMemfd, MemoryBackendRam, Object, RngRandom
+from .objects import (
+    AnyObject, MemoryBackendFile, MemoryBackendMemfd, MemoryBackendRam, Object, RngRandom, Secret,
+)
 
 __all__ = [name for name in dir() if not name.startswith("_")]

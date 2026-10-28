@@ -2,7 +2,9 @@
 
 import os
 import sys
+import subprocess
 from pathlib import Path
+from typing import Any
 
 
 def xdg_config_home() -> Path:
@@ -72,6 +74,29 @@ def download_with_progress(url: str, dest_path: Path, chunk_size: int = 1 << 16,
         sys.stderr.write("\n")
     tmp.replace(dest_path)
 
+
+import subprocess
+
+def run_with_timeout(args, timeout, grace=5):
+    proc = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        start_new_session=True,  # own process group, so we can signal descendants too
+    )
+    try:
+        out, err = proc.communicate(timeout=timeout)
+        return proc.returncode, out, err, False
+    except subprocess.TimeoutExpired:
+        proc.terminate()  # SIGTERM
+        try:
+            out, err = proc.communicate(timeout=grace)
+        except subprocess.TimeoutExpired:
+            proc.kill()  # SIGKILL
+            out, err = proc.communicate()
+        return proc.returncode, out, err, True  # True = timed out
 
 
 # def download_with_progress(url: str, dest_path: str, chunk_size: int = 8192, bar_width: int = 30):

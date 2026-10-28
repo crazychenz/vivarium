@@ -14,6 +14,8 @@ dependencies = [
     "pycdlib",
     #"libvirt-python",
     "dissect.target",
+    "dissect.extfs",
+    "dissect.fat",
     "thirdparty-qemu",
     "thirdparty-dockerfile"
 ]

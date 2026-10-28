@@ -5,6 +5,57 @@ from pathlib import Path
 import thirdparty.qemu.qapi as qapi
 
 
+
+
+
+
+
+
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+def follow(path, proc, out=sys.stdout.buffer, poll=0.1, stop=None):
+    """Tail `path` to `out` until `proc` exits (or `stop` is set), then drain the rest."""
+    path = Path(path)
+    stop = stop or threading.Event()
+
+    # Wait for the file to exist (or give up if the process dies without creating it)
+    while not path.exists():
+        if proc.poll() is not None or stop.is_set():
+            return
+        time.sleep(poll)
+
+    with open(path, "rb") as f:
+        while True:
+            # Sample the exit state BEFORE reading, so output written just before
+            # exit is still picked up by this final pass.
+            finished = proc.poll() is not None or stop.is_set()
+
+            while chunk := f.read(65536):
+                out.write(chunk)
+                out.flush()
+
+            if finished:
+                break
+            time.sleep(poll)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # APPEND = ("root=LABEL=/ rootfstype=ext4 rw console=ttyS0 reboot=k panic=1 "
 #           "modules=virtio_mmio,virtio_blk,virtio_net,ext4 reboot=t")
 
@@ -124,17 +175,14 @@ def extract_files(image, files, dest):
     out = []
  
     target = Target.open(image)
-    try:
-        for f in files:
-            src = target.fs.path(f)
-            if not src.is_file():
-                raise FileNotFoundError(f"{f} not found in {image}")
-            dst = dest / src.name
-            with src.open("rb") as fin, dst.open("wb") as fout:
-                shutil.copyfileobj(fin, fout, 1024 * 1024)
-            out.append(dst)
-    finally:
-        target.close()
+    for f in files:
+        src = target.fs.path(f)
+        if not src.is_file():
+            raise FileNotFoundError(f"{f} not found in {image}")
+        dst = dest / src.name
+        with src.open("rb") as fin, dst.open("wb") as fout:
+            shutil.copyfileobj(fin, fout, 1024 * 1024)
+        out.append(dst)
  
     return out
 
@@ -273,7 +321,7 @@ def build_dockerfile(proxy_mode = "wireguard", agent_type = "none"):
                 quoted=True,
                 fpath="/usr/local/share/ca-certificates/mitmproxy.crt",
                 flags="--chmod=644",
-                script=open('/home/chenz/.mitmproxy/mitmproxy-ca-cert.pem').read(),
+                script=open(Path.home() / '.mitmproxy' / 'mitmproxy-ca-cert.pem').read(),
             ),
             df.Run(commands=["update-ca-certificates"]),
             "# Note: Node doesn't read from system certs.",
@@ -383,12 +431,12 @@ def build_cloud_config():
                 passwd='gofish',
             ),
         ],
-        write_files=[
-            cc.WriteFile(
-                path="/etc/ssh/sshd_config.d/10-hardening.conf",
-                content="PasswordAuthentication no\\nPermitRootLogin no\\nAllowAgentForwarding no",
-            ),
-        ],
+        # write_files=[
+        #     cc.WriteFile(
+        #         path="/etc/ssh/sshd_config.d/10-hardening.conf",
+        #         content='''PasswordAuthentication no\\nPermitRootLogin no\\nAllowAgentForwarding no",
+        #     ),
+        # ],
         package_update=True,
         packages=['docker', 'docker-cli-buildx'],
         runcmd=[
@@ -627,9 +675,9 @@ class VivariumDeployment:
         alpine_cloudinit_dest_path = base_dir / "cache" / "downloads" / "alpine-3.24.2-x86_64-cloudinit-r2.qcow2"
 
         # download os ISO if not cached
-        if not dest_path.exists():
+        if not alpine_cloudinit_dest_path.exists():
             from thirdparty.vivarium.util import download_with_progress
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            alpine_cloudinit_dest_path.parent.mkdir(parents=True, exist_ok=True)
             download_with_progress(
                 url="https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/cloud/alpine-3.24.2-x86_64-cloudinit-r2.qcow2",
                 dest_path=alpine_cloudinit_dest_path,
@@ -637,15 +685,15 @@ class VivariumDeployment:
 
         # TODO: if alpine, we must extract kernel and init
 
-        ligguestfs_app_dest_path = base_dir / "cache" / "downloads" / "appliance-1.58.1.tar.xz"
-        # download os ISO if not cached
-        if not ligguestfs_app_dest_path.exists():
-            from thirdparty.vivarium.util import download_with_progress
-            ligguestfs_app_dest_path.parent.mkdir(parents=True, exist_ok=True)
-            download_with_progress(
-                url="https://download.libguestfs.org/binaries/appliance/appliance-1.58.1.tar.xz",
-                dest_path=ligguestfs_app_dest_path,
-            )
+        # ligguestfs_app_dest_path = base_dir / "cache" / "downloads" / "appliance-1.58.1.tar.xz"
+        # # download os ISO if not cached
+        # if not ligguestfs_app_dest_path.exists():
+        #     from thirdparty.vivarium.util import download_with_progress
+        #     ligguestfs_app_dest_path.parent.mkdir(parents=True, exist_ok=True)
+        #     download_with_progress(
+        #         url="https://download.libguestfs.org/binaries/appliance/appliance-1.58.1.tar.xz",
+        #         dest_path=ligguestfs_app_dest_path,
+        #     )
 
         # libguestfs_extract_files(
         #     alpine_cloudinit_dest_path, 
@@ -656,6 +704,19 @@ class VivariumDeployment:
 
         extract_files(alpine_cloudinit_dest_path, ["/boot/vmlinuz-virt", "/boot/initramfs-virt"], agent_vm_path)
 
+        import thirdparty.qemu.img as qimg
+
+        qemu_img_cmd = qimg.Create(quiet=True, format="qcow2", backing_format="qcow2",
+                    backing_file=alpine_cloudinit_dest_path,
+                    filename=agent_vm_path / "alpine-agent-golden.qcow2", size="10G")
+        
+        print(qemu_img_cmd.to_shell())
+        from thirdparty.vivarium.util import run_with_timeout
+        qemu_img_timeout = 30
+        rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
+        print(f"rc: {rc} timedout: {timedout}")
+        print(f"stdout:\n{out}\nstderr:\n{err}")
+        print("---")
 
         # provision VM with seed ISO
         kernel_modules = ','.join([
@@ -677,29 +738,39 @@ class VivariumDeployment:
         ])
 
 
+        prev_wd = os.getcwd()
+        os.chdir(agent_vm_path)
         qemu_cmd_obj = qapi.QemuCommand(
             # --- common ---
             machine=qapi.MicroVM(acpi=False),
             no_reboot=True,
             enable_kvm=True, cpu="host", memory="2G", smp=2,
-            kernel="alpine-boot/vmlinuz-virt", initrd="alpine-boot/initramfs-virt",
+            kernel="vmlinuz-virt", initrd="initramfs-virt",
             append=kernel_cmdline,
             nodefaults=True, no_user_config=True, display="none",
-            serial=[qapi.ChardevFile(path="./state/log/alpine-agent.console.log")],
-            qmp=[qapi.ChardevSocket(path="./state/run/alpine-agent.qmp", server=True, wait=False)],
-            pidfile="./state/run/alpine-agent.pid",
+            serial=[qapi.ChardevFile(path=Path("logs") / "alpine-agent.console.log")],
+            qmp=[qapi.ChardevSocket(path=Path("run") / "alpine-agent.qmp", server=True, wait=False)],
+            pidfile=Path("run") / "alpine-agent.pid",
             daemonize=True,
             sandbox=True,
             # --- use case specific ---
             drives=[
-                qapi.Drive(id="root", file="alpine-agent-golden.qcow2", format="qcow2", interface="none"),
-                qapi.Drive(id="seed", file="alpine-agent-seed.img", format="raw", interface="none", readonly=True),
+                qapi.Drive(id="root", file=Path("alpine-agent-golden.qcow2"), format="qcow2", interface="none"),
+                qapi.Drive(id="seed", file=Path("seed.iso"), format="raw", interface="none", readonly=True),
             ],
             netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=2222, guest_port=22)])],
             devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
         )
 
         print(f"qemu command: {qemu_cmd_obj.to_shell()}")
+
+        proc = subprocess.Popen(qemu_cmd_obj.to_args(), stdin=subprocess.DEVNULL)
+        t = threading.Thread(target=follow, args=(Path("logs") / "alpine-agent.console.log", proc), daemon=True)
+        t.start()
+        rc = proc.wait()
+        t.join()
+        print("exit:", rc)
+        os.chdir(prev_wd)
 
         # TODO: creates enclosure vm
         #   TODO: create dockerfile in code

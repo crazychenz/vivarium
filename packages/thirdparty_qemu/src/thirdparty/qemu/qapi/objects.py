@@ -49,7 +49,18 @@ class MemoryBackendFile(Object):
     prealloc: bool | None = None
 
 
+class Secret(Object):
+    """A secret (e.g. a LUKS passphrase) referenced by id, such as ``encrypt.key-secret=<id>``."""
+
+    qom_type: Literal["secret"] = "secret"
+    data: str | None = None
+    file: Path | None = None
+    format: Literal["raw", "base64"] | None = None
+    keyid: str | None = None
+    iv: str | None = None
+
+
 AnyObject = Annotated[
-    Union[RngRandom, MemoryBackendRam, MemoryBackendMemfd, MemoryBackendFile, Object],
+    Union[RngRandom, MemoryBackendRam, MemoryBackendMemfd, MemoryBackendFile, Secret, Object],
     Field(union_mode="left_to_right"),
 ]
