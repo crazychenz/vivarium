@@ -7,61 +7,6 @@ ALPINE_DEFAULT_FNAME = "alpine-3.24.2-x86_64-cloudinit-r2.qcow2"
 ALPINE_DEFAULT_URL = f"https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/cloud/{ALPINE_DEFAULT_FNAME}"
 
 
-def extract_files(image, files, dest):
-    import shutil
-    from pathlib import Path
-    from dissect.target import Target
-    """Copy `files` (paths inside the image, e.g. "/boot/vmlinuz-lts") from a
-    qcow2 into `dest`, flattened to their base names. Returns the local paths."""
-    dest = Path(dest)
-    dest.mkdir(parents=True, exist_ok=True)
-    out = []
- 
-    target = Target.open(image)
-    for f in files:
-        src = target.fs.path(f)
-        if not src.is_file():
-            raise FileNotFoundError(f"{f} not found in {image}")
-        dst = dest / src.name
-        with src.open("rb") as fin, dst.open("wb") as fout:
-            shutil.copyfileobj(fin, fout, 1024 * 1024)
-        out.append(dst)
- 
-    return out
-
-
-def follow(path, proc, out=sys.stdout.buffer, poll=0.1, stop=None):    
-    """Tail `path` to `out` until `proc` exits (or `stop` is set), then drain the rest."""
-
-    import sys
-    import threading
-    import time
-    from pathlib import Path
-
-    path = Path(path)
-    stop = stop or threading.Event()
-
-    # Wait for the file to exist (or give up if the process dies without creating it)
-    while not path.exists():
-        if proc.poll() is not None or stop.is_set():
-            return
-        time.sleep(poll)
-
-    with open(path, "rb") as f:
-        while True:
-            # Sample the exit state BEFORE reading, so output written just before
-            # exit is still picked up by this final pass.
-            finished = proc.poll() is not None or stop.is_set()
-
-            while chunk := f.read(65536):
-                out.write(chunk)
-                out.flush()
-
-            if finished:
-                break
-            time.sleep(poll)
-
-
 class AlpineAgentVm(AgentVm):
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
@@ -77,8 +22,10 @@ class AlpineAgentVm(AgentVm):
             self.base_img_path.parent.mkdir(parents=True, exist_ok=True)
             download_with_progress(url=url, dest_path=self.base_img_path)
         
-        extract_files(self.base_img_path, ["/boot/vmlinuz-virt", "/boot/initramfs-virt"], self.path)
-    
+        from thirdparty.vivarium.util import extract_from_disk_image
+        extract_from_disk_image(self.base_img_path, ["/boot/vmlinuz-virt", "/boot/initramfs-virt"], self.path)
+
+
     def prepare_golden(self):
         import thirdparty.qemu.img as qimg
 
@@ -198,8 +145,9 @@ class AlpineAgentVm(AgentVm):
             import sys
             import threading
             import time
+            from thirdparty.vivarium.util import tail_follow
             proc = subprocess.Popen(qemu_cmd_obj.to_args(), stdin=subprocess.DEVNULL)
-            t = threading.Thread(target=follow, args=(log_fpath, proc), daemon=True)
+            t = threading.Thread(target=tail_follow, args=(log_fpath, proc), daemon=True)
             t.start()
             rc = proc.wait()
             t.join()

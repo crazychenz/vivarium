@@ -157,6 +157,60 @@ def run_with_timeout(args, timeout, grace=5):
 #         z.extractall(dest_folder)
 
 
+def tail_follow(path, proc, out=sys.stdout.buffer, poll=0.1, stop=None):    
+    """Tail `path` to `out` until `proc` exits (or `stop` is set), then drain the rest."""
+
+    import sys
+    import threading
+    import time
+    from pathlib import Path
+
+    path = Path(path)
+    stop = stop or threading.Event()
+
+    # Wait for the file to exist (or give up if the process dies without creating it)
+    while not path.exists():
+        if proc.poll() is not None or stop.is_set():
+            return
+        time.sleep(poll)
+
+    with open(path, "rb") as f:
+        while True:
+            # Sample the exit state BEFORE reading, so output written just before
+            # exit is still picked up by this final pass.
+            finished = proc.poll() is not None or stop.is_set()
+
+            while chunk := f.read(65536):
+                out.write(chunk)
+                out.flush()
+
+            if finished:
+                break
+            time.sleep(poll)
+
+
+def extract_from_disk_image(image, files, dest):
+    import shutil
+    from pathlib import Path
+    from dissect.target import Target
+    """Copy `files` (paths inside the image, e.g. "/boot/vmlinuz-lts") from a
+    qcow2 into `dest`, flattened to their base names. Returns the local paths."""
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    out = []
+ 
+    target = Target.open(image)
+    for f in files:
+        src = target.fs.path(f)
+        if not src.is_file():
+            raise FileNotFoundError(f"{f} not found in {image}")
+        dst = dest / src.name
+        with src.open("rb") as fin, dst.open("wb") as fout:
+            shutil.copyfileobj(fin, fout, 1024 * 1024)
+        out.append(dst)
+ 
+    return out
+
 
 def generate_ssh_keys(dest, comment='user@host'):
     from pathlib import Path
