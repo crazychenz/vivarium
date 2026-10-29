@@ -146,8 +146,14 @@ class AlpineAgentVm(AgentVm):
             import threading
             import time
             from thirdparty.vivarium.util import tail_follow
+            Path(pidfile_fpath).unlink(missing_ok=True)
             proc = subprocess.Popen(qemu_cmd_obj.to_args(), stdin=subprocess.DEVNULL)
-            t = threading.Thread(target=tail_follow, args=(log_fpath, proc), daemon=True)
+            t = threading.Thread(
+                target=tail_follow,
+                args=(log_fpath, pidfile_fpath),
+                kwargs={"idle_timeout": 60},
+                daemon=True,
+            )
             t.start()
             rc = proc.wait()
             t.join()

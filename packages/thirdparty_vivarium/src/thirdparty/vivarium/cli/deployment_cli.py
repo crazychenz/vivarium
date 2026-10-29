@@ -14,7 +14,8 @@ class VivariumDeployment:
 
         # --- vivarium deployment init <name>
         vivarium_deployment_init_parser = vivarium_deployment_subparsers.add_parser("init")
-        vivarium_deployment_init_parser.add_argument("deployment_name")
+        vivarium_deployment_init_parser.add_argument("--no-reboot", dest='reboot', action="store_false", default=True)
+        vivarium_deployment_init_parser.add_argument("deployment_name", nargs="?", default="default")
         vivarium_deployment_init_parser.set_defaults(func=VivariumDeployment.deployment_init_func)
 
         # TODO: start and stop for deployment
@@ -38,9 +39,6 @@ class VivariumDeployment:
         from thirdparty.vivarium.config import resolve_base_dir
         base_dir = resolve_base_dir(config)
 
-        print("vivarium deployment ls not implemented")
-        print(f"base_dir = {base_dir}")
-
         p = Path(base_dir / "deployments")
         names = [d.name for d in p.iterdir() if d.is_dir()]
         for name in names:
@@ -55,7 +53,7 @@ class VivariumDeployment:
         # Creates folder structure
         from thirdparty.vivarium.deployment import Deployment
         deployment = Deployment(vivarium_base_dir, name=args.deployment_name)
-        deployment.use_alpine(reboot=False)
+        deployment.use_alpine(reboot=args.reboot)
 
         # TODO: Consider releasing a build of qemu-wg-bridge upstream for easy caching.
 
@@ -66,10 +64,6 @@ class VivariumDeployment:
         import shutil
         base_dir = resolve_base_dir(config)
         deployments_dir = base_dir / "deployments"
-
-        print("vivarium deployment rm not implemented")
-        print(f"name = {args.deployment_name}")
-        print(f"base_dir = {base_dir}")
 
         target = (deployments_dir / args.deployment_name).resolve()
         base = base_dir.resolve()
