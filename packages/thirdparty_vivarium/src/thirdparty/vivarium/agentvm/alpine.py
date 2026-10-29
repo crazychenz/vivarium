@@ -68,6 +68,11 @@ class AlpineAgentVm(AgentVm):
         
         cert_fname = "mitmproxy-ca-cert.pem"
         shutil.copy2(mitm_config_path / cert_fname, self.import_path() / cert_fname)
+        
+        agent_cri_src_path = self.vivarium_base / "cache" / "cri_images" / "agent-claude-container.tar"
+        agent_cri_dst_path = self.import_path() / "agent-claude-container.tar"
+        shutil.copy2(agent_cri_src_path, agent_cri_dst_path)
+
         shutil.copytree(self.path / "keys", self.import_path(), dirs_exist_ok=True)
 
 

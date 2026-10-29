@@ -124,6 +124,10 @@ class AgentVm():
         generate_ssh_keys(self.path / "keys", "user@agent")
 
         self.dockerfile = _build_dockerfile(proxy_mode="wireguard", agent_type="none")
+        print('--------------- CRT BUILDER ---------------')
+        from thirdparty.vivarium.crt import CrtBuilder
+        CrtBuilder(vivarium_path=self.vivarium_path, name="agent-claude-container.tar", dockerfile="FROM ubuntu:noble\n").build()
+        breakpoint()
 
 
     def _build_cloud_config(self, reboot : bool = True):
@@ -139,6 +143,8 @@ class AgentVm():
             )
 
         user_data = cc.CloudConfig(
+            # ! Move this output setting to AlpineAgentVm
+            output=cc.Output(all="| tee -a /var/log/cloud-init-output.log /dev/ttyS0"),
             disable_root=False,
             ssh_pwauth=True,
             users=[
