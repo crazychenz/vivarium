@@ -18,8 +18,16 @@ bundle DURATION="":
 #    ./docs/builders/docusaurus/build-docs.sh
 
 devinstall:
-    # For now we pull from trunk until the Python 3.14 fix is versioned.
-    pip install -U "git+https://github.com/fox-it/dissect.target.git@main"
+    # --- dissect.target fix ---
+    # For now we pull dissect.target from trunk until the Python 3.14 fix is versioned.
+    # pip does not cache clones, so each run is slow.
+    # Slow Command: pip install -U "git+https://github.com/fox-it/dissect.target.git@main"
+    # Instead, we'll keep our own clone and install from it.
+    # Faster local cache:
+    d=~/.cache/dissect.target.git; { [ -d "$d/.git" ] && git -C "$d" pull --ff-only || git clone https://github.com/fox-it/dissect.target.git "$d"; }
+    pip install -U ~/.cache/dissect.target.git
+    # --- dissect.target fix ---
+
     pip install -U -r requirements.txt
     pip install -U -e ./packages/thirdparty_qemu
     pip install -U -e ./packages/thirdparty_dockerfile

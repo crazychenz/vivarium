@@ -15,7 +15,7 @@ class IndentDumper(yaml.SafeDumper):
         return super().increase_indent(flow, False)   # never use "indentless" sequences
 
 
-def to_yaml(config: CloudConfig) -> str:
+def cloud_config_to_yaml(config: CloudConfig) -> str:
     """Render a CloudConfig as a ``#cloud-config`` document (only fields that were set)."""
     data = config.model_dump(mode="json", by_alias=True, exclude_unset=True, exclude_none=True)
     #return "#cloud-config\n" + yaml.safe_dump(data, sort_keys=False)
