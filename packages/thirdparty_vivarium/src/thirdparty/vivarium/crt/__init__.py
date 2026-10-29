@@ -53,7 +53,7 @@ if [ -z "$out" ]; then
 fi
 
 echo "crt: building $tag from $ctx"
-podman build -t "$tag" -f "$ctx/Dockerfile" "$ctx"
+podman build --network=host -t "$tag" -f "$ctx/Dockerfile" "$ctx"
 
 # docker-archive loads with both `podman load` and `docker load`. Written straight onto
 # the (host sparse) block device; the host trims it back to the end of the tar.

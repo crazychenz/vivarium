@@ -126,8 +126,8 @@ class AgentVm():
         self.dockerfile = _build_dockerfile(proxy_mode="wireguard", agent_type="none")
         print('--------------- CRT BUILDER ---------------')
         from thirdparty.vivarium.crt import CrtBuilder
-        CrtBuilder(vivarium_path=self.vivarium_path, name="agent-claude-container.tar", dockerfile="FROM ubuntu:noble\n").build()
-        breakpoint()
+        DOCKERFILE="FROM ubuntu:noble\nRUN /bin/sh -c 'echo We are in the build process.'\nCMD /bin/sh -c 'echo We are in the run process.'\n"
+        CrtBuilder(vivarium_path=self.vivarium_path, name="agent-claude-container", dockerfile=DOCKERFILE).build()
 
 
     def _build_cloud_config(self, reboot : bool = True):
@@ -152,42 +152,76 @@ class AgentVm():
                     name="agent",
                     shell="/bin/sh",
                     lock_passwd=False,
-                    #ssh_authorized_keys=open('path/to/pub_key').read()
+                    ssh_authorized_keys=[open(self.import_path() / "id_ed25519.pub").read()],
                     passwd='gofish',
                 ),
                 cc.Users(
                     name="root",
                     shell="/bin/sh",
                     lock_passwd=False,
-                    #ssh_authorized_keys=open('path/to/pub_key').read()
+                    ssh_authorized_keys=[open(self.import_path() / "id_ed25519.pub").read()],
                     passwd='gofish',
                 ),
             ],
-            # write_files=[
+            write_files=[
             #     cc.WriteFile(
             #         path="/etc/ssh/sshd_config.d/10-hardening.conf",
             #         content='''PasswordAuthentication no\\nPermitRootLogin no\\nAllowAgentForwarding no",
             #     ),
-            # ],
+                cc.WriteFile(
+                    path='/etc/subuid',
+                    content='alpine:100000:65536\n',
+                    append=True,
+                ),
+                cc.WriteFile(
+                    path='/etc/subgid',
+                    content='alpine:100000:65536\n',
+                    append=True,
+                ),
+            ],
+
             package_update=True,
-            packages=['docker', 'docker-cli-buildx'],
+            packages=['podman', 'ca-certificates'],
             runcmd=[
                 # SSH Things and Stuff
-                "printf '%s\\n' 'PasswordAuthentication no' 'PermitRootLogin no' 'AllowAgentForwarding no' | cat - /etc/ssh/sshd_config > /tmp/sshd_config.new",
-                "cat /tmp/sshd_config.new > /etc/ssh/sshd_config",
-                "rm -f /tmp/sshd_config.new",
-                "rc-service sshd restart",
-                # Everything Else
-                "mkdir -p /mnt/seed /opt/agent-image",
+                #"printf '%s\\n' 'PasswordAuthentication no' 'PermitRootLogin no' 'AllowAgentForwarding no' | cat - /etc/ssh/sshd_config > /tmp/sshd_config.new",
+                #"cat /tmp/sshd_config.new > /etc/ssh/sshd_config",
+                #"rm -f /tmp/sshd_config.new",
+                #"rc-service sshd restart",
+
+                # Mount seed iso
+                "mkdir -p /mnt/seed",
                 [ 'sh', '-c', r"mount -o ro $(findfs LABEL=cidata) /mnt/seed" ],
-                "cp -r /mnt/seed/agent-image/. /opt/agent-image/",
-                "cp /mnt/seed/mitmproxy.crt /usr/local/share/ca-certificates/mitmproxy.crt",
+                "echo MNT SEED CONTENTS",
+                "ls -lR /mnt/seed",
+
+                # # Everything Else
+                # "mkdir -p /opt/agent-image",
+                # "cp -r /mnt/seed/agent-image/. /opt/agent-image/",
+                
+                # mitm certificate setup
+                "cp /mnt/seed/mitmproxy-ca-cert.pem /usr/local/share/ca-certificates/mitmproxy-ca-cert.pem",
                 "update-ca-certificates",
+
+                # docker setup
+                #"addgroup agent docker",
+                #"rc-update add docker default",
+                #"rc-service docker start",
+                #"#docker build -t agent:latest /opt/agent-image",
+
+                # ! alpine only
+                "rc-service cgroups start",
+
+                # podman setup
+                "echo LOADING IMAGE",
+                "podman load -i /mnt/seed/agent-claude-container.tar",
+                "echo LISTING IMAGES",
+                "podman images",
+                "echo RUNNING IMAGE",
+                "podman run --network=host --rm --name agent-claude localhost/agent-claude-container:latest",
+                # TODO: Need to create script to start agent on reboot
                 "umount /mnt/seed",
-                "addgroup agent docker",
-                "rc-update add docker default",
-                "rc-service docker start",
-                "#docker build -t agent:latest /opt/agent-image",
+                # !!For debug only!!
                 "addgroup agent wheel",
                 "echo 'permit nopass :wheel' > /etc/doas.d/doas.conf",
             ],

@@ -45,8 +45,8 @@ class Deployment():
         self.agent_vm.__class__ = AlpineAgentVm
         self.agent_vm.cache_base()
         self.agent_vm.prepare_golden()
-        self.agent_vm.prepare_cloud_config(reboot=reboot)
         self.agent_vm.build_import_folder()
+        self.agent_vm.prepare_cloud_config(reboot=reboot)
         self.agent_vm.build_seed_image()
         self.agent_vm.provision_vm()
 
