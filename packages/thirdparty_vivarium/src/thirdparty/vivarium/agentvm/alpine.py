@@ -157,7 +157,7 @@ class AlpineAgentVm(AgentVm):
             t.start()
             rc = proc.wait()
             t.join()
-            print("exit:", rc)
+            # useless when qemu is daemonized: print("exit:", rc)
 
         except Exception as e:
             print(f"Error: {e}")

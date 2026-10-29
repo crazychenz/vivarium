@@ -24,7 +24,7 @@ class VivariumDeployment:
         # --- vivarium deployment rm <name>
         vivarium_deployment_rm_parser = vivarium_deployment_subparsers.add_parser("rm")
         vivarium_deployment_rm_parser.add_argument("-f", "--force", dest="force", action="store_true", default=False)
-        vivarium_deployment_rm_parser.add_argument("deployment_name")
+        vivarium_deployment_rm_parser.add_argument("deployment_name", nargs="?", default="default")
         vivarium_deployment_rm_parser.set_defaults(func=VivariumDeployment.deployment_rm_func)
 
         # --- vivarium deployment info <name>
