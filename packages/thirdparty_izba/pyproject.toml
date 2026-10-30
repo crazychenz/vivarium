@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thirdparty-izba"
+description = "Simplified user mode virtualization"
+# Note: No idea the real version required at this time.
+requires-python = ">=3.9"
+
+dependencies = [
+    "argcomplete",
+    "pyyaml",
+    "pycdlib",
+    "dissect.target",
+    "dissect.extfs",
+    "dissect.fat",
+    "thirdparty-qemu",
+]
+
+# Requires PEP 621 (setuptools>=61)
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = true
+
+[project.scripts]
+izba = "thirdparty.izba.cli:main"
+
+[project.entry-points."thirdparty_izba_profiles"]
+# Register crt (container runtime) as an izba profile
+crt = "thirdparty.izba.profiles.izba:register_profile_crt"

@@ -31,6 +31,7 @@ devinstall:
     pip install -U -r requirements.txt
     pip install -U -e ./packages/thirdparty_qemu
     pip install -U -e ./packages/thirdparty_dockerfile
+    pip install -U -e ./packages/thirdparty_izba
     pip install -U -e ./packages/thirdparty_vivarium
 
 #    pip install -U -e ./packages/thirdparty_dalvik
