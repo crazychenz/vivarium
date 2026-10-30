@@ -86,6 +86,7 @@ class AlpineAgentVm(AgentVm):
             "virtio_blk",
             "virtio_net",
             "ext4",
+            # ?? "virtiofs", # CONFIG_VIRTIO_FS (since Linux 5.4) deps: fuse, virtio_pci
         ])
         kernel_root = "LABEL=/"
         kernel_rootfstype = "ext4"

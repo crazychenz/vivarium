@@ -32,4 +32,5 @@ namespaces = true
 
 [project.scripts]
 vivarium = "thirdparty.vivarium.cli:main"
+viv = "thirdparty.vivarium.cli:main"
 
