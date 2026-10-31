@@ -6,6 +6,7 @@ import argparse
 import sys
 import argcomplete
 
+from thirdparty.izba import Izba
 
 def init_argparse():
     # --- izba
@@ -132,96 +133,63 @@ def init_argparse():
 
 
 def izba_version_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+    return Izba(config).version()
 
 
 # List profiles and names with instance images.
 def izba_ps_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+    return Izba(config).ps()
 
 
 # List profiles and names with golden images.
 def izba_images_func(args, config):
-    from pathlib import Path
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-
-    # p = Path(base_path / "deployments")
-    # names = [d.name for d in p.iterdir() if d.is_dir()]
-    # for name in names:
-    #     print(name)
-    # TODO: list images
+    return Izba(config).images()
 
 
-def izba_inspect_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+def izba_inspect_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).inspect()
 
 
 # Build golden image.
-def izba_build_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
-
-    # TODO: Use profile to construct cloud_config and qemu command.
-    # TODO: Launch qemu command and monitor for exit.
+def izba_build_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).build()
 
 
 # Copy/adjust golden image into instance image (with qemu-img).
 # If golden image missing, call build().
-def izba_create_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+def izba_create_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).create()
 
 
 # Remove golden image.
-def izba_rmi_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+def izba_rmi_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).rmi()
 
 
 # Remove instance image (and all overlay images).
 # qemu must be shutdown?
-def izba_rm_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+def izba_rm_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).rm()
 
 
 # If instance image missing, call create()
-def izba_start_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+def izba_start_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).start()
 
 
 # Kill with pidfile
-def izba_stop_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+def izba_stop_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).stop()
 
 
 # Run ssh command in VM
-def izba_exec_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+def izba_exec_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).exec()
 
 
 # If instance image missing, call create()
-def izba_run_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+def izba_run_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).run()
 
 
 # Copy from VM to host:
@@ -230,27 +198,26 @@ def izba_run_func(args, config):
 # Copy to VM:
 # - If VM running, scp.
 # - If VM not running, need read from another VM. libguestfs?
-def izba_cp_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+# def izba_cp_func(args, config, profile_cls=None, profile_opts=None):
+#     return Izba(config).
 
 
 # Replace ./profile/name with contents of tar.
-def izba_load_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+def izba_load_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).load()
 
 
 # Tar contents of ./profile/name (minus instance) to path.
-def izba_save_func(args, config):
-    from thirdparty.izba.config import resolve_base_path
-    base_path = resolve_base_path(config)
-    print(f"{sys._getframe().f_code.co_name} not implemented")
+def izba_save_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config).save()
 
 
 def main():
+
+    from thirdparty.izba.cli.registrar import get_izba_profile_eps
+
+    profile_index = get_izba_profile_eps()
+
     izba_parser = init_argparse()
     argcomplete.autocomplete(izba_parser)
 
@@ -290,10 +257,16 @@ def main():
         config = cfg.load_izba_config(config_path=config_path)
     else:
         print(f"Config not found at: {config_path}, using defaults.")
-
-    base_path = cfg.resolve_base_path(config)
  
-    args.func(args, config)
+    # TODO: translate profile alias to Profile object and pass to func.
+
+    if hasattr(args, 'profile'):
+        profile_cls = profile_index._index[args.profile]['class']
+        profile_opts = profile_index._index[args.profile]['opts']
+
+        args.func(args, config, profile_cls=profile_cls, profile_opts=profile_opts)
+    else:
+        args.func(args, config)
 
 
 if __name__ == "__main__":

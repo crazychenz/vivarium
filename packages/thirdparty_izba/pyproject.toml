@@ -33,4 +33,4 @@ izba = "thirdparty.izba.cli:main"
 
 [project.entry-points."thirdparty_izba_profiles"]
 # Register crt (container runtime) as an izba profile
-crt = "thirdparty.izba.profiles.izba:register_profile_crt"
+crt = "thirdparty.izba.profile.izba:register_profile_crt"
