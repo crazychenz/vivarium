@@ -8,6 +8,7 @@ import argcomplete
 
 from thirdparty.izba import Izba
 
+
 def init_argparse():
     # --- izba
     izba_parser = argparse.ArgumentParser(prog="izba")
@@ -25,6 +26,14 @@ def init_argparse():
     # --- izba version                       # display version of izba
     izba_version_parser = izba_subparsers.add_parser("version")
     izba_version_parser.set_defaults(func=izba_version_func)
+
+    # --- izba system
+    izba_system_parser = izba_subparsers.add_parser("system", help="Inspect the host system")
+    izba_system_subparsers = izba_system_parser.add_subparsers(dest="izba_system_command", required=True)
+
+    # --- izba system features
+    izba_system_features_parser = izba_system_subparsers.add_parser("features")
+    izba_system_features_parser.set_defaults(func=izba_system_features_func)
 
     # --- izba ps [opts] [-a]                # print running izba vm profile states, -a for all profile states
     izba_ps_parser = izba_subparsers.add_parser("ps")
@@ -134,6 +143,11 @@ def init_argparse():
 
 def izba_version_func(args, config):
     return Izba(config).version()
+
+
+def izba_system_features_func(args, config):
+    from thirdparty.izba.system import check_system_features
+    check_system_features()
 
 
 # List profiles and names with instance images.
