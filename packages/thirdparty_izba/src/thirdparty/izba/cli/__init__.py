@@ -142,7 +142,8 @@ def init_argparse():
 
 
 def izba_version_func(args, config):
-    return Izba(config).version()
+    from thirdparty.izba import version as izba_version
+    return izba_version()
 
 
 def izba_system_features_func(args, config):
@@ -152,7 +153,7 @@ def izba_system_features_func(args, config):
 
 # List profiles and names with instance images.
 def izba_ps_func(args, config):
-    return Izba(config).ps()
+    return Izba(config).ps(all=args.all)
 
 
 # List profiles and names with golden images.
@@ -161,49 +162,49 @@ def izba_images_func(args, config):
 
 
 def izba_inspect_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).inspect()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).inspect()
 
 
 # Build golden image.
 def izba_build_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).build()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).build()
 
 
 # Copy/adjust golden image into instance image (with qemu-img).
 # If golden image missing, call build().
 def izba_create_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).create()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).create()
 
 
 # Remove golden image.
 def izba_rmi_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).rmi()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).rmi()
 
 
 # Remove instance image (and all overlay images).
 # qemu must be shutdown?
 def izba_rm_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).rm()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).rm()
 
 
 # If instance image missing, call create()
 def izba_start_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).start()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).start()
 
 
 # Kill with pidfile
 def izba_stop_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).stop()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).stop()
 
 
 # Run ssh command in VM
 def izba_exec_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).exec()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).exec()
 
 
 # If instance image missing, call create()
 def izba_run_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).run()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).run()
 
 
 # Copy from VM to host:
@@ -213,17 +214,17 @@ def izba_run_func(args, config, profile_cls=None, profile_opts=None):
 # - If VM running, scp.
 # - If VM not running, need read from another VM. libguestfs?
 # def izba_cp_func(args, config, profile_cls=None, profile_opts=None):
-#     return Izba(config).
+#     return Izba(config, profile=profile_cls(**profile_opts), name=args.name)
 
 
 # Replace ./profile/name with contents of tar.
 def izba_load_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).load()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).load()
 
 
 # Tar contents of ./profile/name (minus instance) to path.
 def izba_save_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config).save()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).save()
 
 
 def main():

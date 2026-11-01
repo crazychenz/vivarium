@@ -102,14 +102,24 @@ def implicit_base_path():
     return base_path.resolve()
 
 
+def implicit_profiles_path(base_path=(Path('.') / "izba")):
+    return (base_path / "profiles").resolve()
+
+
 def resolve_base_path(config=None):
     # Assumes config already loaded.
-    if "base_path" in config and config["base_path"] is not None:
+    if config and "base_path" in config and config["base_path"] is not None:
         return Path(config["base_path"]).resolve()
 
     return implicit_base_path()
 
 
+def resolve_profiles_path(config=None):
+    # Assumes config already loaded.
+    if config and "profiles_path" in config and config["profiles_path"] is not None:
+        return Path(config["profiles_path"]).resolve()
+
+    return implicit_profiles_path(base_path=resolve_base_path(config))
 
 
 
