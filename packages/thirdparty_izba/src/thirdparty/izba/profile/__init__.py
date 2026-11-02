@@ -81,7 +81,7 @@ class BaseProfile():
 
 
     # Starts the VM and leaves running until kill or stop.
-    def start_instance_vm(self):
+    def start_instance_vm(self, **opts):
         raise NotImplementedError()
 
 

@@ -93,20 +93,31 @@ def init_argparse():
 
     # --- izba stop [opts] <vm> [<name>]     # kill vm
     izba_stop_parser = izba_subparsers.add_parser("stop")
+    izba_stop_parser.add_argument("--golden", dest='golden', action="store_true", default=False)
     izba_stop_parser.add_argument("profile")
     izba_stop_parser.add_argument("name", nargs="?", default="default")
     izba_stop_parser.set_defaults(func=izba_stop_func)
 
     # --- izba exec [opts] <vm> [<name>]     # implicitly tty + stdin -> shell
     izba_exec_parser = izba_subparsers.add_parser("exec")
+    izba_exec_parser.add_argument("-u", dest='user', default='user')
+    izba_exec_parser.add_argument("--golden", dest='golden', action="store_true", default=False)
     izba_exec_parser.add_argument("profile")
     izba_exec_parser.add_argument("name", nargs="?", default="default")
     izba_exec_parser.set_defaults(func=izba_exec_func)
 
+    # --- izba logs [opts] <vm> [<name>]     # implicitly tty + stdin -> shell
+    izba_logs_parser = izba_subparsers.add_parser("logs")
+    izba_logs_parser.add_argument("profile")
+    izba_logs_parser.add_argument("name", nargs="?", default="default")
+    izba_logs_parser.set_defaults(func=izba_logs_func)
+
     # --- izba run [opts] <vm> [<name>] -- <args> # run process in vm `izba run -C /path/to/def -- podman build`
     izba_run_parser = izba_subparsers.add_parser("run")
-    izba_run_parser.add_argument("--network", choices=["internet-only", "slirp", "none"], default='none')
     izba_run_parser.add_argument("-f", dest='force', action="store_true", default=False)
+    izba_run_parser.add_argument("-u", dest='user', default='user')
+    izba_run_parser.add_argument("--network", choices=["internet-only", "slirp", "none"], default='none')
+    izba_run_parser.add_argument("--golden", dest='golden', action="store_true", default=False)
     izba_run_parser.add_argument("profile")
     izba_run_parser.add_argument("name", nargs="?", default="default")
     izba_run_parser.set_defaults(func=izba_run_func)
@@ -194,17 +205,21 @@ def izba_start_func(args, config, profile_cls=None, profile_opts=None):
 
 # Kill with pidfile
 def izba_stop_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).stop()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).stop(golden=args.golden)
 
 
 # Run ssh command in VM
 def izba_exec_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).exec()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).exec(user=args.user, golden=args.golden, command=args.cmd)
+
+
+def izba_logs_func(args, config, profile_cls=None, profile_opts=None):
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).logs()
 
 
 # If instance image missing, call create()
 def izba_run_func(args, config, profile_cls=None, profile_opts=None):
-    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).run()
+    return Izba(config, profile=profile_cls(**profile_opts), name=args.name).run(network=args.network, user=args.user, golden=args.golden, command=args.cmd)
 
 
 # Copy from VM to host:

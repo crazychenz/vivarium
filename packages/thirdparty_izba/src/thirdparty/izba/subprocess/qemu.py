@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 def is_qemu_process(pid: int, qemu_prefix: str = "qemu-system-") -> bool:
     """True if pid is a live (non-zombie) process whose executable is `name`."""
     from pathlib import Path
@@ -23,6 +25,7 @@ def scan_qemu_pidfiles(profiles_path: str | Path, pidfile_fname: str) -> dict[Pa
     Returns {inst_path: {"has_pidfile": bool, "pid": int | None, "running": bool}}
     """
     from pathlib import Path
+    from thirdparty.izba.subprocess import read_pid
     root = Path(profiles_path)
     result: dict[Path, dict] = {}
 

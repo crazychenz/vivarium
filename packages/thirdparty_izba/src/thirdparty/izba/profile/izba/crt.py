@@ -8,7 +8,11 @@ from thirdparty.izba.profile import BaseProfile
 
 ALPINE_DEFAULT_FNAME = "alpine-3.24.2-x86_64-cloudinit-r2.qcow2"
 ALPINE_DEFAULT_URL = f"https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/cloud/{ALPINE_DEFAULT_FNAME}"
-ALPINE_KERNEL_FILES = ["/boot/vmlinuz-virt", "/boot/initramfs-virt"]
+ALPINE_BOOT_FILES = ["/boot/vmlinuz-virt", "/boot/initramfs-virt"]
+
+UBUNTU_NOBLE_URL = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+UBUNTU_NOBLE_FNAME = "noble-server-cloudimg-amd64.img"
+UBUNTU_BOOT_FILES = ["/boot/vmlinuz", "/boot/initrd.img"]
 
 
 def register_profile_crt(profile_index: ProfileIndex):
@@ -141,7 +145,7 @@ class IzbaCrtProfile(BaseProfile):
 
     # Download the base image we'll base golden and instance images from.
     # Depends on cached target, internet, or available mirror.
-    def cache_base(self, izba, url=ALPINE_DEFAULT_URL, fname=ALPINE_DEFAULT_FNAME):
+    def cache_base(self, izba, url=UBUNTU_NOBLE_URL, fname=UBUNTU_NOBLE_FNAME):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         self.base_img_path = izba.base_path / "cache" / "downloads" / fname
@@ -154,8 +158,8 @@ class IzbaCrtProfile(BaseProfile):
         
         from thirdparty.izba.extraction import extract_from_disk_image
         # TODO: Consider moving the KERNEL_FILES to prepare_* functions.
-        extract_from_disk_image(self.base_img_path, ALPINE_KERNEL_FILES, izba.gold_path)
-        extract_from_disk_image(self.base_img_path, ALPINE_KERNEL_FILES, izba.inst_path)
+        extract_from_disk_image(self.base_img_path, UBUNTU_BOOT_FILES, izba.gold_path)
+        extract_from_disk_image(self.base_img_path, UBUNTU_BOOT_FILES, izba.inst_path)
 
 
     # Copy/adjust the base to the golden (before running golden first-boot)
@@ -191,6 +195,23 @@ class IzbaCrtProfile(BaseProfile):
         import os
         from pathlib import Path
 
+        '''
+            #-kernel "noble-server-cloudimg-amd64-vmlinuz-generic" -initrd "noble-server-cloudimg-amd64-initrd-generic" \
+            -append "root=LABEL=cloudimg-rootfs rw console=ttyS0 reboot=k panic=1 random.trust_cpu=on" \
+            -nodefaults -no-user-config -display none \
+            -serial "file:./state/log/agent.console.log" \
+            -qmp "unix:./state/run/agent.qmp,server,nowait" \
+            -drive "id=root,file=agent-golden.qcow2,format=qcow2,if=none" \
+            -device virtio-blk-device,drive=root \
+            -drive "id=seed,file=agent-seed.img,format=raw,if=none,readonly=on" \
+            -device virtio-blk-device,drive=seed \
+            -netdev "user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22" -device virtio-net-device,netdev=n0 \
+            -device virtio-rng-device \
+            -pidfile "./state/run/agent.pid" -daemonize \
+            -sandbox on
+            root=LABEL=cloudimg-rootfs
+        '''
+
         def build_kernel_cmdline():
             # provision VM with seed ISO
             kernel_modules = ','.join([
@@ -200,16 +221,17 @@ class IzbaCrtProfile(BaseProfile):
                 "ext4",
                 # ?? "virtiofs", # CONFIG_VIRTIO_FS (since Linux 5.4) deps: fuse, virtio_pci
             ])
-            kernel_root = "LABEL=/"
+            kernel_root = "LABEL=cloudimg-rootfs"
             kernel_rootfstype = "ext4"
             return ' '.join([
                 f"root={kernel_root}",
-                f"rootfstype={kernel_rootfstype}",
+                #f"rootfstype={kernel_rootfstype}",
                 "rw",
                 "console=ttyS0",
                 "panic=1",
-                f"modules={kernel_modules}",
+                #f"modules={kernel_modules}",
                 "reboot=t", #"reboot=k",
+                "random.trust_cpu=on",
             ])
         kernel_cmdline = build_kernel_cmdline()
 
@@ -219,14 +241,20 @@ class IzbaCrtProfile(BaseProfile):
 
             # Note: Arguments deliberately hard coded as relative to self.path
             # TODO: Consider dynamically calculating relative paths.
-            log_fpath = Path("logs") / "golden-console.log"
+
+            import time
+            real_log_fpath = Path("logs") / f"golden-console-{int(time.time())}.log"
+            log_fpath = Path("logs") / f"golden-console.log"
+            log_fpath.unlink(missing_ok=True)
+            log_fpath.symlink_to(real_log_fpath.name)
+
             golden_fpath = Path("golden.qcow2")
             seed_fpath = Path("seed.iso")
             pidfile_fpath = Path("run") / "golden.pid"
             qmp_fpath = Path("run") / "golden.qmp"
-            kernel_fpath = Path("vmlinuz-virt")
-            initrd_fpath = Path("initramfs-virt")
-            from thirdparty.izba import find_free_port
+            kernel_fpath = Path("vmlinuz")
+            initrd_fpath = Path("initrd.img")
+            from thirdparty.izba.network import find_free_port
             ssh_host_port = find_free_port(2222)
             ssh_host_port_fpath = Path("run") / "ssh_host_port."
 
@@ -301,7 +329,7 @@ class IzbaCrtProfile(BaseProfile):
 
 
     # Starts the VM and leaves running until kill or stop.
-    def start_instance_vm(self, izba):
+    def start_instance_vm(self, izba, console='stdout', **opts):
 
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
@@ -324,7 +352,6 @@ class IzbaCrtProfile(BaseProfile):
             sudo rm -f /etc/ssh/ssh_host_*
         '''
 
-
         def build_kernel_cmdline():
             # provision VM with seed ISO
             kernel_modules = ','.join([
@@ -334,16 +361,17 @@ class IzbaCrtProfile(BaseProfile):
                 "ext4",
                 # ?? "virtiofs", # CONFIG_VIRTIO_FS (since Linux 5.4) deps: fuse, virtio_pci
             ])
-            kernel_root = "LABEL=/"
+            kernel_root = "LABEL=cloudimg-rootfs"
             kernel_rootfstype = "ext4"
             return ' '.join([
                 f"root={kernel_root}",
-                f"rootfstype={kernel_rootfstype}",
+                #f"rootfstype={kernel_rootfstype}",
                 "rw",
                 "console=ttyS0",
                 "panic=1",
-                f"modules={kernel_modules}",
+                #f"modules={kernel_modules}",
                 "reboot=t", #"reboot=k",
+                "random.trust_cpu=on",
             ])
         kernel_cmdline = build_kernel_cmdline()
 
@@ -355,14 +383,19 @@ class IzbaCrtProfile(BaseProfile):
 
             # Note: Arguments deliberately hard coded as relative to self.path
             # TODO: Consider dynamically calculating relative paths.
-            log_fpath = Path("logs") / "instance-console.log"
+            import time
+            real_log_fpath = Path("logs") / f"instance-console-{int(time.time())}.log"
+            log_fpath = Path("logs") / f"instance-console.log"
+            log_fpath.unlink(missing_ok=True)
+            log_fpath.symlink_to(real_log_fpath.name)
+
             instance_fpath = Path("instance.qcow2")
             seed_fpath = Path("seed.iso")
             pidfile_fpath = Path("run") / "instance.pid"
             qmp_fpath = Path("run") / "instance.qmp"
-            kernel_fpath = Path("vmlinuz-virt")
-            initrd_fpath = Path("initramfs-virt")
-            from thirdparty.izba import find_free_port
+            kernel_fpath = Path("vmlinuz")
+            initrd_fpath = Path("initrd.img")
+            from thirdparty.izba.network import find_free_port
             ssh_host_port = find_free_port(2222)
             ssh_host_port_fpath = Path("run") / "ssh_host_port"
 
@@ -413,8 +446,15 @@ class IzbaCrtProfile(BaseProfile):
             try:
                 ssh_host_port_fpath.parent.mkdir(parents=True, exist_ok=True)
                 ssh_host_port_fpath.write_text(f"{ssh_host_port}\n")
-                from thirdparty.izba.subprocess import run_and_follow_with_pidfile
-                run_and_follow_with_pidfile(qemu_cmd_obj.to_args(), log_fpath, pidfile_fpath)
+                if console == 'stdout':
+                    from thirdparty.izba.subprocess import run_and_follow_with_pidfile
+                    run_and_follow_with_pidfile(qemu_cmd_obj.to_args(), log_fpath, pidfile_fpath)
+                elif console == 'none':
+                    # TODO: Technically this passed the console to stdout, but if we daemonize
+                    # TODO: the qemu process, it should immediately return.
+                    import subprocess
+                    subprocess.run(qemu_cmd_obj.to_args())
+
 
             except Exception as e:
                print(f"Error: {e}")
@@ -538,14 +578,14 @@ class IzbaCrtProfile(BaseProfile):
             users=[
                 cc.Users(
                     name="user",
-                    shell="/bin/sh",
+                    shell="/bin/bash",
                     lock_passwd=False,
                     ssh_authorized_keys=[open(izba.inst_path / "context" / "keys" / "id_ed25519.pub").read()],
                     passwd='gofish',
                 ),
                 cc.Users(
                     name="root",
-                    shell="/bin/sh",
+                    shell="/bin/bash",
                     lock_passwd=False,
                     ssh_authorized_keys=[open(izba.inst_path / "context" / "keys" / "id_ed25519.pub").read()],
                     passwd='gofish',
