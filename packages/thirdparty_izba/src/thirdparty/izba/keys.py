@@ -18,6 +18,8 @@ def generate_ssh_keys(dest, comment='user@host'):
         format=serialization.PublicFormat.OpenSSH,
     )
 
+    dest.mkdir(parents=True, exist_ok=True)
+
     priv_path = dest / Path("id_ed25519")
     priv_path.write_bytes(private)
     priv_path.chmod(0o600)

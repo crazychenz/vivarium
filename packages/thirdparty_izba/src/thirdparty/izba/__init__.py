@@ -6,6 +6,19 @@ def version():
     return [0, 0, 0, 0]
 
 
+def find_free_port(start=2222, end=65535, host="127.0.0.1"):
+    """Return the first TCP port >= start that can be bound on host."""
+    import socket
+    for port in range(start, end + 1):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind((host, port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError(f"No free port found in {start}-{end} on {host}")
+
+
 class Izba():
     def __init__(self, config, profile=None, name='default'):
         from thirdparty.izba.config import resolve_base_path, resolve_profiles_path
@@ -106,17 +119,17 @@ class Izba():
         # TODO: Allow build force to ignore existing golden.
 
         # Only do these if golden does not exist.
-        if (self.inst_path / "golden.qcow2").exists():
+        if (self.gold_path / "golden.qcow2").exists():
             print(f"Golden image already exists for {self.type_name}:{self.name}")
             return
 
-        self.profile.prepare_guest_data(self)
-        self.profile.prepare_cloud_config(self)
-        self.profile.build_import_folder(self)
-        self.profile.build_seed_image(self)
+        self.profile.prepare_golden_guest_data(self)
+        self.profile.prepare_golden_cloud_config(self)
+        self.profile.build_golden_context_folder(self)
+        self.profile.build_golden_seed_image(self)
         self.profile.cache_base(self)
-        self.profile.prepare_golden(self)
-        self.profile.build_golden(self)
+        self.profile.prepare_golden_disk_image(self)
+        self.profile.build_golden_disk_image(self)
 
         # TODO: Use profile to construct cloud_config and qemu command.
         # TODO: Launch qemu command and monitor for exit.
@@ -135,12 +148,20 @@ class Izba():
             return
 
         self.build(**opts)
-        self.profile.prepare_instance(self)
+        
+        self.profile.prepare_instance_guest_data(self)
+        self.profile.prepare_instance_cloud_config(self)
+        self.profile.build_instance_context_folder(self)
+        self.profile.build_instance_seed_image(self)
+        self.profile.cache_base(self)
+        self.profile.prepare_instance_disk_image(self)
 
 
     # Remove golden image.
     def rmi(self, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        import shutil
 
         # Avoid relative escapes.
         root = self.gold_path.resolve()
@@ -152,6 +173,7 @@ class Izba():
 
         # Is it running?
         from thirdparty.izba.subprocess import read_pid
+        from thirdparty.izba.subprocess.qemu import is_qemu_process
         pid = read_pid(root / "run" / "golden.pid")
         if pid is not None and is_qemu_process(pid):
             print(f"Refusing: {root.parent.name}/{root.name} is running (pid {pid}). Stop it first.")
@@ -168,7 +190,7 @@ class Izba():
             print("Aborted.")
             return False
 
-        #shutil.rmtree(root)
+        shutil.rmtree(root)
         print("Deleted.")
         return True
 
@@ -177,6 +199,8 @@ class Izba():
     # qemu must be shutdown?
     def rm(self, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        import shutil
 
         # Avoid relative escapes.
         root = self.inst_path.resolve()
@@ -188,6 +212,7 @@ class Izba():
 
         # Is it running?
         from thirdparty.izba.subprocess import read_pid
+        from thirdparty.izba.subprocess.qemu import is_qemu_process
         pid = read_pid(root / "run" / "instance.pid")
         if pid is not None and is_qemu_process(pid):
             print(f"Refusing: {root.parent.name}/{root.name} is running (pid {pid}). Stop it first.")
@@ -204,7 +229,7 @@ class Izba():
             print("Aborted.")
             return False
 
-        #shutil.rmtree(root)
+        shutil.rmtree(root)
         print("Deleted.")
         return True
 
@@ -221,17 +246,68 @@ class Izba():
             return
 
         self.create(**opts)
-        self.profile.start_instance(self)
+        self.profile.start_instance_vm(self)
 
 
     # Kill with pidfile
     def stop(self, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
+        from pathlib import Path
+        from thirdparty.izba.subprocess import workdir, is_alive, pid_shutdown, read_pid
+        from thirdparty.izba.subprocess.qemu import is_qemu_process
+
+        inst_path = self.inst_path
+        pidfile_fname = "instance.pid"
+        if "golden" in opts and opts["golden"] is True:
+            inst_path = self.gold_path
+            pidfile_fname = "golden.pid"
+
+        with workdir(inst_path):
+            pidfile_fpath = Path("run") / pidfile_fname
+
+            # Is the system running qemu-system-*?
+            pid = read_pid(pidfile_fpath)
+            if pid and is_alive(pid) and is_qemu_process(pid):
+                pid_shutdown(pid)
+                print(f"{self.type_name}/{self.name} shutdown.")
+            else:
+                print(f"{self.type_name}/{self.name} is not running")
+
 
     # Run ssh command in VM
     def exec(self, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        # ! TODO: This is weird if we ever want to use stdin
+        from pathlib import Path
+        from thirdparty.izba.subprocess import workdir, read_pid, is_alive
+        from thirdparty.izba.subprocess.qemu import is_qemu_process
+
+        inst_path = self.inst_path
+        pidfile_fname = "instance.pid"
+        if "golden" in opts and opts["golden"] is True:
+            inst_path = self.gold_path
+            pidfile_fname = "golden.pid"
+
+        print(f"SSHing via {inst_path}")
+
+        with workdir(inst_path):
+            pidfile_fpath = Path("run") / pidfile_fname
+
+            # Is the system running?
+            pid = read_pid(pidfile_fpath)
+            if pid and is_alive(pid) and is_qemu_process(pid):
+                ssh_host_port_fpath = Path(".") / "run" / "ssh_host_port"
+                from thirdparty.izba.subprocess.ssh import simple_tty_ssh_run
+                # TODO: Add command from **opts
+                simple_tty_ssh_run(
+                    destination='user@127.0.0.1',
+                    port=int(ssh_host_port_fpath.read_text().strip()),
+                    identity_fpath=Path("context") / "keys" / "id_ed25519",
+                )
+            else:
+                print(f"{self.type_name}/{self.name} is not running")
 
 
     # If instance image missing, call create()

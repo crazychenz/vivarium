@@ -3,17 +3,32 @@
 class BaseProfile():
 
 
+    @staticmethod
+    def type_name():
+        raise NotImplementedError()
+
+
+    def get_type_name(self):
+        return type(self).type_name()
+
+
     # Prepare all guest data that is not cloud_config (user-data) or meta-data
     # - scripts
     # - dockerfiles, containerfiles, manifests, binaries, configurations
     # Depends on: generate_ssh_keys()
-    def prepare_guest_data(self):
+    def prepare_golden_guest_data(self):
+        raise NotImplementedError()
+
+    def prepare_instance_guest_data(self):
         raise NotImplementedError()
 
 
     # Build cloud config representative of the profile's use case.
     # Depends on: prepare_guest_data()
-    def prepare_cloud_config(self, reboot : bool = True):
+    def prepare_golden_cloud_config(self, reboot : bool = True):
+        raise NotImplementedError()
+
+    def prepare_instance_cloud_config(self, reboot : bool = True):
         raise NotImplementedError()
 
 
@@ -21,7 +36,10 @@ class BaseProfile():
     # everything in the import folder will also be delivered.
     # Note: user ssh keys already included in seed
     # Depends on: prepare_guest_data()
-    def build_import_folder(self):
+    def build_golden_context_folder(self):
+        raise NotImplementedError()
+    
+    def build_instance_context_folder(self):
         raise NotImplementedError()
 
 
@@ -31,7 +49,10 @@ class BaseProfile():
     # - keys/
     # - import/
     # Depends on: prepare_cloud_config(), build_import_folder()
-    def build_seed_image(self):
+    def build_golden_seed_image(self):
+        raise NotImplementedError()
+    
+    def build_instance_seed_image(self):
         raise NotImplementedError()
 
 
@@ -43,37 +64,37 @@ class BaseProfile():
 
     # Copy/adjust the base to the golden (before running golden first-boot)
     # Depends on: cache_base
-    def prepare_golden(self):
+    def prepare_golden_disk_image(self):
         raise NotImplementedError()
 
 
     # Runs the VM and shuts down when complete.
     # Depends on: prepare_golden(), build_seed_image()
-    def build_golden(self):
+    def build_golden_disk_image(self):
         raise NotImplementedError()
 
 
     # Copy/adjust the golden to the instance
     # Depends on: build_golden(self)
-    def prepare_instance(self):
+    def prepare_instance_disk_image(self):
         raise NotImplementedError()
 
 
     # Starts the VM and leaves running until kill or stop.
-    def start_instance(self):
+    def start_instance_vm(self):
         raise NotImplementedError()
 
 
     # Stops the VM.
-    def stop_instance(self):
+    def stop_instance_vm(self):
         raise NotImplementedError()
 
 
     # Executes command in VM (via SSH)
-    def exec_instance(self):
+    def exec_instance_vm(self):
         raise NotImplementedError()
 
 
     # Starts VM, runs a single script, shuts down VM.
-    def run_instance(self):
+    def run_instance_vm(self):
         raise NotImplementedError()
