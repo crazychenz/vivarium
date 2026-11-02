@@ -17,15 +17,14 @@ class Izba():
         self.config = config
         self.base_path = resolve_base_path(config)
         self.profiles_path = resolve_profiles_path(config)
-        self.profiles_gold_path = self.profiles_path / "gold"
-        self.profiles_inst_path = self.profiles_path / "inst"
 
         self.profile = profile
         self.name = name
+        self.type_name = None
+        self.inst_path = None
         if isinstance(self.profile, BaseProfile):
             self.type_name = profile.get_type_name()
-            self.gold_path = self.profiles_gold_path / self.type_name / self.name
-            self.inst_path = self.profiles_inst_path / self.type_name / self.name
+            self.inst_path = self.profiles_path / self.type_name / self.name
 
         elif self.profile is not None:
             from thirdparty.izba.cli.registrar import get_izba_profile_eps
@@ -34,64 +33,91 @@ class Izba():
             profile_opts = profile_index._index[profile]['opts']
             self.profile = profile_cls(**profile_opts)
             self.type_name = profile_cls.type_name()
-            self.gold_path = self.profiles_gold_path / self.type_name / self.name
-            self.inst_path = self.profiles_inst_path / self.type_name / self.name
-        else:
-            # Hopefully not a instance specific call.
-            self.type_name = None
-            self.gold_path = None
-            self.inst_path = None
-
-        # Note: member functions given the name of the profile instance to use.
-
-
-    def create_std_folders(self):
-        '''
-            context - all things to be included in read-only mount
-            logs - place for logs
-            run - place for sockets, pid files, and other run based artifacts
-            overlays - place for snapshot overlays
-            mnt - place for folders to be mounted in VM
-        '''
-        for folder in ['context', 'logs', 'run']:
-            (self.gold_path / folder).mkdir(parents=True, exist_ok=True)
+            self.inst_path = self.profiles_path / self.type_name / self.name
         
-        for folder in ['context', 'logs', 'run', 'overlays', 'mnt']:
-            (self.inst_path / folder).mkdir(parents=True, exist_ok=True)
+        if self.inst_path is not None:
+            for folder in ['context', 'misc', 'artifacts', 'images', 'logs', 'run', 'mnt', 'overlays']:
+                (self.inst_path / folder).mkdir(parents=True, exist_ok=True)
+            (self.inst_path / "logs" / "console").mkdir(parents=True, exist_ok=True)
+
+    def create_std_folders(self, fpath):
+        '''
+            PROFILE_TYPE/PROFILE_NAME
+            - context/ - files provided to guest (as seed.iso)
+              - public ssh keys
+              - public certs
+            - misc/ - file not provided to guest
+              - public and private ssh keys
+              - public certs and private keys
+            - artifacts/ - posterity created by izba (not for operation)
+              - qemu-cmd.sh
+              - user-data.yaml
+            - images/
+              - base-image.qcow2
+              - origin-overlay.qcow2 - Origin overlay with base-image backing.
+              - origin-overlay.state - RAM and state snapshot
+            - logs/
+              - console.log (symlink)
+              - console/
+                - console-$(date).log
+            - run/
+              - qemu.pid
+              - qemu.qmp
+            - mnt/
+
+            - overlays/
+              - overlay-X/
+                - (unused?) context/ - files provided to guest (as seed.iso)
+                - (unused?) misc/ - file not provided to guest
+                - (unused?) artifacts/ - posterity created by izba (not for operation)
+                - images/
+                  - overlay-X.qcow2
+                - logs/
+                  - console.log (symlink)
+                  - console/
+                    - console-$(date).log
+                - run/
+                  - qemu.pid
+                  - qemu.qmp
+                - mnt/
+        '''
+
+        for folder in ['context', 'misc', 'artifacts', 'images', 'logs', 'run', 'mnt']:
+            (fpath / folder).mkdir(parents=True, exist_ok=True)
 
 
     # List running VMs, [-a] list all instance VMs
     def ps(self, all=False, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        from thirdparty.izba.subprocess.qemu import scan_qemu_pidfiles
-        summary = scan_qemu_pidfiles(self.profiles_inst_path, "instance.pid")
+        # from thirdparty.izba.subprocess.qemu import scan_qemu_pidfiles
+        # summary = scan_qemu_pidfiles(self.profiles_inst_path, "instance.pid")
 
-        print(f"{"Profile":15} {"Name":15} {"Pidfile":7} {"PID":10} {"Running":6}")
-        print(f"{"-"*15:15} {"-"*15:15} {"-"*7:7} {"-"*10:10} {"-"*7:7}")
-        for key_path, value in summary.items():
-            has_pidfile = 'True' if value['has_pidfile'] else 'False'
-            pid = f'{value['pid']}' if has_pidfile else ''
-            running = 'True' if value['running'] else 'False'
-            if not all and not value['running']:
-                continue
-            print(f"{value['type_name']:15} {key_path.name:15} {has_pidfile:7} {pid:10} {running:7}")
+        # print(f"{"Profile":15} {"Name":15} {"Pidfile":7} {"PID":10} {"Running":6}")
+        # print(f"{"-"*15:15} {"-"*15:15} {"-"*7:7} {"-"*10:10} {"-"*7:7}")
+        # for key_path, value in summary.items():
+        #     has_pidfile = 'True' if value['has_pidfile'] else 'False'
+        #     pid = f'{value['pid']}' if has_pidfile else ''
+        #     running = 'True' if value['running'] else 'False'
+        #     if not all and not value['running']:
+        #         continue
+        #     print(f"{value['type_name']:15} {key_path.name:15} {has_pidfile:7} {pid:10} {running:7}")
 
 
     # List profiles and names with golden images.
     def images(self, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        from thirdparty.izba.subprocess.qemu import scan_qemu_pidfiles
-        summary = scan_qemu_pidfiles(self.profiles_gold_path, "golden.pid")
+        # from thirdparty.izba.subprocess.qemu import scan_qemu_pidfiles
+        # summary = scan_qemu_pidfiles(self.profiles_gold_path, "golden.pid")
 
-        print(f"{"Profile":15} {"Name":15} {"Pidfile":7} {"PID":10} {"Running":6}")
-        print(f"{"-"*15:15} {"-"*15:15} {"-"*7:7} {"-"*10:10} {"-"*7:7}")
-        for key_path, value in summary.items():
-            has_pidfile = 'True' if value['has_pidfile'] else 'False'
-            pid = f'{value['pid']}' if has_pidfile else ''
-            running = 'True' if value['running'] else 'False'
-            print(f"{value['type_name']:15} {key_path.name:15} {has_pidfile:7} {pid:10} {running:7}")
+        # print(f"{"Profile":15} {"Name":15} {"Pidfile":7} {"PID":10} {"Running":6}")
+        # print(f"{"-"*15:15} {"-"*15:15} {"-"*7:7} {"-"*10:10} {"-"*7:7}")
+        # for key_path, value in summary.items():
+        #     has_pidfile = 'True' if value['has_pidfile'] else 'False'
+        #     pid = f'{value['pid']}' if has_pidfile else ''
+        #     running = 'True' if value['running'] else 'False'
+        #     print(f"{value['type_name']:15} {key_path.name:15} {has_pidfile:7} {pid:10} {running:7}")
 
 
     def inspect(self, **opts):
@@ -113,27 +139,24 @@ class Izba():
         # TODO: Allow build force to ignore existing golden.
 
         # Only do these if golden does not exist.
-        if (self.gold_path / "golden.qcow2").exists():
-            print(f"Golden image already exists for {self.type_name}:{self.name}. Run rmi first.")
+        if (self.inst_path / "images" / "base-image.qcow2").exists():
+            print(f"Base image already exists for {self.type_name}:{self.name}. Run rmi first.")
             return
 
-        # Build data that could be used by cloud_config
-        self.profile.prepare_golden_guest_data(self)
-        # Build baseline cloud_config/user-data configuration
-        self.profile.prepare_golden_cloud_config(self)
-        # Build the data going into seed.iso
-        self.profile.build_golden_context_folder(self)
-        # Build the seed.iso file
-        self.profile.build_golden_seed_image(self)
         # Download the OS, kernel, and initrd
         self.profile.cache_base(self)
+        # Build data that could be used by cloud_config
+        self.profile.prepare_base_guest_data(self)
+        # Build baseline cloud_config/user-data configuration
+        self.profile.prepare_base_cloud_config(self)
+        # Build the data going into seed.iso
+        self.profile.build_base_context_folder(self)
+        # Build the seed.iso file
+        self.profile.build_base_seed_image(self)
         # Copy the OS image to golden.qcow2
-        self.profile.prepare_golden_disk_image(self)
+        self.profile.prepare_base_disk_image(self)
         # Run qemu to initialize the golden image.
-        self.profile.build_golden_disk_image(self)
-
-        # TODO: Use profile to construct cloud_config and qemu command.
-        # TODO: Launch qemu command and monitor for exit.
+        self.profile.build_base_disk_image(self)
 
 
     # Copy/adjust golden image into instance image (with qemu-img).
@@ -190,46 +213,7 @@ class Izba():
 
 
     # Remove golden image.
-    def rmi(self, **opts):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        import shutil
-
-        # Avoid relative escapes.
-        root = self.gold_path.resolve()
-
-        # Must be a folder
-        if not root.is_dir():
-            print(f"Not a folder: {root}")
-            return False
-
-        # Is it running?
-        from thirdparty.izba.subprocess import read_pid
-        from thirdparty.izba.subprocess.qemu import is_qemu_process
-        pid = read_pid(root / "run" / "golden.pid")
-        if pid is not None and is_qemu_process(pid):
-            print(f"Refusing: {root.parent.name}/{root.name} is running (pid {pid}). Stop it first.")
-            return False
-
-        # Show what will be lost.
-        n_files = sum(1 for p in root.rglob("*") if p.is_file())
-        size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
-        print(f"About to permanently delete:\n  {root}\n  {n_files} files, {size / 1e6:.1f} MB")
-
-        # Make the user type the name, not just 'y', to avoid reflex-confirming.
-        answer = input(f"Type the instance name ({root.parent.name}/{root.name}) to confirm: ").strip()
-        if answer != f"{root.parent.name}/{root.name}":
-            print("Aborted.")
-            return False
-
-        shutil.rmtree(root)
-        print("Deleted.")
-        return True
-
-
-    # Remove instance image (and all overlay images).
-    # qemu must be shutdown?
-    def rm(self, force=False, **opts):
+    def rmi(self, force=False, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         import shutil
@@ -245,10 +229,12 @@ class Izba():
         # Is it running?
         from thirdparty.izba.subprocess import read_pid
         from thirdparty.izba.subprocess.qemu import is_qemu_process
-        pid = read_pid(root / "run" / "instance.pid")
+        pid = read_pid(root / "run" / "qemu.pid")
         if pid is not None and is_qemu_process(pid):
             print(f"Refusing: {root.parent.name}/{root.name} is running (pid {pid}). Stop it first.")
             return False
+
+        # TODO: Do no allow delete if there are any overlays (w/o force).
 
         if not force:
             # Show what will be lost.
@@ -265,6 +251,46 @@ class Izba():
         shutil.rmtree(root)
         print("Deleted.")
         return True
+
+
+    # Remove instance image (and all overlay images).
+    # qemu must be shutdown?
+    def rm(self, force=False, **opts):
+        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        # import shutil
+
+        # # Avoid relative escapes.
+        # root = self.inst_path.resolve()
+
+        # # Must be a folder
+        # if not root.is_dir():
+        #     print(f"Not a folder: {root}")
+        #     return False
+
+        # # Is it running?
+        # from thirdparty.izba.subprocess import read_pid
+        # from thirdparty.izba.subprocess.qemu import is_qemu_process
+        # pid = read_pid(root / "run" / "instance.pid")
+        # if pid is not None and is_qemu_process(pid):
+        #     print(f"Refusing: {root.parent.name}/{root.name} is running (pid {pid}). Stop it first.")
+        #     return False
+
+        # if not force:
+        #     # Show what will be lost.
+        #     n_files = sum(1 for p in root.rglob("*") if p.is_file())
+        #     size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
+        #     print(f"About to permanently delete:\n  {root}\n  {n_files} files, {size / 1e6:.1f} MB")
+
+        #     # Make the user type the name, not just 'y', to avoid reflex-confirming.
+        #     answer = input(f"Type the instance name ({root.parent.name}/{root.name}) to confirm: ").strip()
+        #     if answer != f"{root.parent.name}/{root.name}":
+        #         print("Aborted.")
+        #         return False
+
+        # shutil.rmtree(root)
+        # print("Deleted.")
+        # return True
 
 
     # If instance image missing, call create()

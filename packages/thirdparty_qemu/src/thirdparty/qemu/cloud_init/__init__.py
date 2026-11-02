@@ -68,21 +68,23 @@ def _add_tree(iso, src: Path, iso_dir: str, joliet_dir: str, reserved: set[str] 
             iso.add_file(str(entry), f"{iso_dir}/{iso_name}",
                          rr_name=entry.name, joliet_path=f"{joliet_dir}/{entry.name}")
 
-def make_seed(path: Path, user_data: str, meta_data: str,
-              network_config: str | None = None, tree: Path | None = None) -> None:
+def make_seed(path: Path,
+              #user_data: str, meta_data: str,
+              #network_config: str | None = None,
+              tree: Path | None = None) -> None:
     iso = pycdlib.PyCdlib()
     iso.new(interchange_level=3, joliet=3, rock_ridge="1.09", vol_ident="cidata")
 
-    files = {"user-data": user_data, "meta-data": meta_data}
-    if network_config:
-        files["network-config"] = network_config
-    for name, text in files.items():
-        data = text.encode()
-        iso.add_fp(BytesIO(data), len(data), f"/{name.upper().replace('-', '_')}.;1",
-                   rr_name=name, joliet_path=f"/{name}")
+    # files = {"user-data": user_data, "meta-data": meta_data}
+    # if network_config:
+    #     files["network-config"] = network_config
+    # for name, text in files.items():
+    #     data = text.encode()
+    #     iso.add_fp(BytesIO(data), len(data), f"/{name.upper().replace('-', '_')}.;1",
+    #                rr_name=name, joliet_path=f"/{name}")
 
     if tree is not None:
-        _add_tree(iso, tree.resolve(), "", "", reserved=set(files))
+        _add_tree(iso, tree.resolve(), "", "") #, reserved=set(files))
 
     iso.write(str(path))
     iso.close()

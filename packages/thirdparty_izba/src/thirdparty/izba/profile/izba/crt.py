@@ -40,109 +40,6 @@ class IzbaCrtProfile(BaseProfile):
         return 'crt'
 
 
-    # Prepare all guest data that is not cloud_config (user-data) or meta-data
-    # - scripts
-    # - dockerfiles, containerfiles, manifests, binaries, configurations
-    # Depends on: generate_ssh_keys()
-    # TODO: Do we need a golden version and an instance version?
-    def prepare_golden_guest_data(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        # Creates folder structure
-        izba.create_std_folders()
-
-        from thirdparty.izba.keys import generate_ssh_keys
-        generate_ssh_keys(izba.gold_path / "context" / "keys")
-    
-
-    def prepare_instance_guest_data(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        # Creates folder structure
-        izba.create_std_folders()
-
-        from thirdparty.izba.keys import generate_ssh_keys
-        generate_ssh_keys(izba.inst_path / "context" / "keys")
-
-
-    # Build cloud config representative of the profile's use case.
-    # Depends on: prepare_guest_data()
-    def prepare_golden_cloud_config(self, izba, reboot : bool = True):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        self.cloud_init_user_data = self._build_golden_cloud_config(izba, reboot=self.firstboot_reboot)
-
-        import time
-        self.cloud_init_meta_data = {
-            'instance-id': f'agent-{izba.name}-{int(time.time())}',
-            'local-hostname': f'agent-{izba.name}',
-        }
-
-
-    def prepare_instance_cloud_config(self, izba, reboot : bool = True):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        self.cloud_init_user_data = self._build_instance_cloud_config(izba)
-
-        import time
-        self.cloud_init_meta_data = {
-            'instance-id': f'agent-{izba.name}-{int(time.time())}',
-            'local-hostname': f'agent-{izba.name}',
-        }
-
-    # When the cloud_config (ie user-data) is delivered to the VM,
-    # everything in the import folder will also be delivered.
-    # Note: user ssh keys already included in seed
-    # Depends on: prepare_guest_data()
-    def build_golden_context_folder(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        import shutil
-
-        # TODO: Copy any binaries or dependencies to install here.
-        # TODO: k3s? podman packages? docker packages?
-
-        #shutil.copytree(izba.gold_path / "keys", izba.gold_path / "import", dirs_exist_ok=True)
-
-
-    def build_instance_context_folder(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-
-    # Construct the seed image itself:
-    # - user-data
-    # - meta-data
-    # - keys/
-    # - import/
-    # Depends on: prepare_cloud_config(), build_import_folder()
-    def build_golden_seed_image(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        from thirdparty.qemu.cloud_init import make_seed
-        from thirdparty.qemu.cloud_init.cloud_config import cloud_config_to_yaml
-        import yaml
-
-        seed_path = izba.gold_path / "seed.iso"
-        user_data_yaml = cloud_config_to_yaml(self.cloud_init_user_data)
-        meta_data_yaml = yaml.dump(self.cloud_init_meta_data)
-        # TODO: Change function so everything in "context" becomes seed.iso
-        make_seed(path=seed_path, user_data=user_data_yaml, meta_data=meta_data_yaml, tree=(izba.gold_path / "context"))
-
-
-    def build_instance_seed_image(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        from thirdparty.qemu.cloud_init import make_seed
-        from thirdparty.qemu.cloud_init.cloud_config import cloud_config_to_yaml
-        import yaml
-
-        seed_path = izba.inst_path / "seed.iso"
-        user_data_yaml = cloud_config_to_yaml(self.cloud_init_user_data)
-        meta_data_yaml = yaml.dump(self.cloud_init_meta_data)
-        # TODO: Change function so everything in "context" becomes seed.iso
-        make_seed(path=seed_path, user_data=user_data_yaml, meta_data=meta_data_yaml, tree=(izba.inst_path / "context"))
-
-
     # Download the base image we'll base golden and instance images from.
     # Depends on cached target, internet, or available mirror.
     def cache_base(self, izba, url=UBUNTU_NOBLE_URL, fname=UBUNTU_NOBLE_FNAME):
@@ -155,16 +52,115 @@ class IzbaCrtProfile(BaseProfile):
             from thirdparty.izba.download import download_with_progress
             self.base_img_path.parent.mkdir(parents=True, exist_ok=True)
             download_with_progress(url=url, dest_path=self.base_img_path)
+
+
+    # Prepare all guest data that is not cloud_config (user-data) or meta-data
+    # - scripts
+    # - dockerfiles, containerfiles, manifests, binaries, configurations
+    # Depends on: generate_ssh_keys()
+    # TODO: Do we need a golden version and an instance version?
+    def prepare_base_guest_data(self, izba):
+        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        from thirdparty.izba.keys import generate_ssh_keys
+        generate_ssh_keys(izba.inst_path / "misc" / "ssh")
+    
+
+    def prepare_instance_guest_data(self, izba):
+        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        # # Creates folder structure
+        # izba.create_std_folders()
+
+        # from thirdparty.izba.keys import generate_ssh_keys
+        # generate_ssh_keys(izba.inst_path / "context" / "keys")
+
+
+    # Build cloud config representative of the profile's use case.
+    # Depends on: prepare_guest_data()
+    def prepare_base_cloud_config(self, izba, reboot : bool = True):
+        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        self.cloud_init_user_data = self._build_base_cloud_config(izba, reboot=self.firstboot_reboot)
+
+        import time
+        self.cloud_init_meta_data = {
+            'instance-id': f'{izba.type_name}-{izba.name}-{int(time.time())}',
+            'local-hostname': f'{izba.type_name}-{izba.name}',
+        }
+
+
+    def prepare_instance_cloud_config(self, izba, reboot : bool = True):
+        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        # self.cloud_init_user_data = self._build_instance_cloud_config(izba)
+
+        # import time
+        # self.cloud_init_meta_data = {
+        #     'instance-id': f'agent-{izba.name}-{int(time.time())}',
+        #     'local-hostname': f'agent-{izba.name}',
+        # }
+
+    # When the cloud_config (ie user-data) is delivered to the VM,
+    # everything in the import folder will also be delivered.
+    # Note: user ssh keys already included in seed
+    # Depends on: prepare_guest_data()
+    def build_base_context_folder(self, izba):
+        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        # import shutil
+
+        # TODO: Copy any binaries or dependencies to install here.
+        # TODO: k3s? podman packages? docker packages?
+
+        # shutil.copytree(izba.gold_path / "keys", izba.gold_path / "import", dirs_exist_ok=True)
+
+
+    def build_instance_context_folder(self, izba):
+        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+
+    # Construct the seed image itself:
+    # - user-data
+    # - meta-data
+    # - keys/
+    # - import/
+    # Depends on: prepare_cloud_config(), build_import_folder()
+    def build_base_seed_image(self, izba):
+        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        from thirdparty.qemu.cloud_init import make_seed
+        from thirdparty.qemu.cloud_init.cloud_config import cloud_config_to_yaml
+        import yaml
+
+        seed_path = izba.inst_path / "images" / "seed.iso"
         
-        from thirdparty.izba.extraction import extract_from_disk_image
-        # TODO: Consider moving the KERNEL_FILES to prepare_* functions.
-        extract_from_disk_image(self.base_img_path, UBUNTU_BOOT_FILES, izba.gold_path)
-        extract_from_disk_image(self.base_img_path, UBUNTU_BOOT_FILES, izba.inst_path)
+        user_data_fpath = izba.inst_path / "context" / "user-data"
+        user_data_fpath.write_text(cloud_config_to_yaml(self.cloud_init_user_data))
+
+        meta_data_fpath = izba.inst_path / "context" / "meta-data"
+        meta_data_fpath.write_text(yaml.dump(self.cloud_init_meta_data))
+
+        make_seed(path=seed_path, tree=(izba.inst_path / "context"))
+
+
+    def build_instance_seed_image(self, izba):
+        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        # from thirdparty.qemu.cloud_init import make_seed
+        # from thirdparty.qemu.cloud_init.cloud_config import cloud_config_to_yaml
+        # import yaml
+
+        # seed_path = izba.inst_path / "seed.iso"
+        # user_data_yaml = cloud_config_to_yaml(self.cloud_init_user_data)
+        # meta_data_yaml = yaml.dump(self.cloud_init_meta_data)
+        # # TODO: Change function so everything in "context" becomes seed.iso
+        # make_seed(path=seed_path, user_data=user_data_yaml, meta_data=meta_data_yaml, tree=(izba.inst_path / "context"))
 
 
     # Copy/adjust the base to the golden (before running golden first-boot)
     # Depends on: cache_base
-    def prepare_golden_disk_image(self, izba):
+    def prepare_base_disk_image(self, izba):
         
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
         
@@ -175,7 +171,7 @@ class IzbaCrtProfile(BaseProfile):
             format="qcow2",
             backing_format="qcow2",
             backing_file=self.base_img_path,
-            filename=(izba.gold_path / "golden.qcow2"),
+            filename=(izba.inst_path / "images" / "base-image.qcow2"),
             size="10G")
         
         print(qemu_img_cmd.to_shell())
@@ -186,111 +182,85 @@ class IzbaCrtProfile(BaseProfile):
         print(f"stdout:\n{out}\nstderr:\n{err}")
         print("---")
 
+        from thirdparty.izba.extraction import extract_from_disk_image
+        # TODO: Consider moving the KERNEL_FILES to prepare_* functions.
+        extract_from_disk_image(self.base_img_path, UBUNTU_BOOT_FILES, izba.inst_path / "images")
+
 
     # Runs the VM and shuts down when complete.
     # Depends on: prepare_golden(), build_seed_image()
-    def build_golden_disk_image(self, izba, name='default', **opts):
+    def build_base_disk_image(self, izba, name='default', **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         import os
         from pathlib import Path
 
-        '''
-            #-kernel "noble-server-cloudimg-amd64-vmlinuz-generic" -initrd "noble-server-cloudimg-amd64-initrd-generic" \
-            -append "root=LABEL=cloudimg-rootfs rw console=ttyS0 reboot=k panic=1 random.trust_cpu=on" \
-            -nodefaults -no-user-config -display none \
-            -serial "file:./state/log/agent.console.log" \
-            -qmp "unix:./state/run/agent.qmp,server,nowait" \
-            -drive "id=root,file=agent-golden.qcow2,format=qcow2,if=none" \
-            -device virtio-blk-device,drive=root \
-            -drive "id=seed,file=agent-seed.img,format=raw,if=none,readonly=on" \
-            -device virtio-blk-device,drive=seed \
-            -netdev "user,id=n0,hostfwd=tcp:127.0.0.1:2223-:22" -device virtio-net-device,netdev=n0 \
-            -device virtio-rng-device \
-            -pidfile "./state/run/agent.pid" -daemonize \
-            -sandbox on
-            root=LABEL=cloudimg-rootfs
-        '''
-
-        def build_kernel_cmdline():
-            # provision VM with seed ISO
-            kernel_modules = ','.join([
-                "virtio_mmio",
-                "virtio_blk",
-                "virtio_net",
-                "ext4",
-                # ?? "virtiofs", # CONFIG_VIRTIO_FS (since Linux 5.4) deps: fuse, virtio_pci
-            ])
-            kernel_root = "LABEL=cloudimg-rootfs"
-            kernel_rootfstype = "ext4"
-            return ' '.join([
-                f"root={kernel_root}",
-                #f"rootfstype={kernel_rootfstype}",
-                "rw",
-                "console=ttyS0",
-                "panic=1",
-                #f"modules={kernel_modules}",
-                "reboot=t", #"reboot=k",
-                "random.trust_cpu=on",
-            ])
-        kernel_cmdline = build_kernel_cmdline()
+        kernel_cmdline = ' '.join([
+            f"root=LABEL=cloudimg-rootfs",
+            "rw",
+            "console=ttyS0",
+            "panic=1", # TODO: What does this do?
+            "reboot=t", # shutdown qemu on reboot
+            #"reboot=k",
+            "random.trust_cpu=on", # TODO: What does this do?
+            #"ds=nocloud,s=/opt/seed,i=special-id"
+        ])
 
         # Arguments too long if we don't change folders.
         from thirdparty.izba.subprocess import workdir
-        with workdir(izba.gold_path):
+        with workdir(izba.inst_path):
 
             # Note: Arguments deliberately hard coded as relative to self.path
             # TODO: Consider dynamically calculating relative paths.
 
             import time
-            real_log_fpath = Path("logs") / f"golden-console-{int(time.time())}.log"
-            log_fpath = Path("logs") / f"golden-console.log"
+            real_log_fpath = Path("logs") / "console" / f"console-{int(time.time())}.log"
+            log_fpath = Path("logs") / f"console.log"
             log_fpath.unlink(missing_ok=True)
-            log_fpath.symlink_to(real_log_fpath.name)
+            log_fpath.symlink_to(Path("console") / real_log_fpath.name)
 
-            golden_fpath = Path("golden.qcow2")
-            seed_fpath = Path("seed.iso")
-            pidfile_fpath = Path("run") / "golden.pid"
-            qmp_fpath = Path("run") / "golden.qmp"
-            kernel_fpath = Path("vmlinuz")
-            initrd_fpath = Path("initrd.img")
+            base_image_fpath = Path("images") / "base-image.qcow2"
+            seed_fpath = Path("images") / Path("seed.iso")
+            pidfile_fpath = Path("run") / "qemu.pid"
+            qmp_fpath = Path("run") / "qemu.qmp"
+            kernel_fpath = Path("images") / Path("vmlinuz")
+            initrd_fpath = Path("images") / Path("initrd.img")
+
             from thirdparty.izba.network import find_free_port
             ssh_host_port = find_free_port(2222)
-            ssh_host_port_fpath = Path("run") / "ssh_host_port."
+            ssh_host_port_fpath = Path("run") / "ssh_host_port"
 
-            def build_qemu_command():
-                import thirdparty.qemu.qapi as qapi
-                qemu_cmd_obj = qapi.QemuCommand(
-                    # --- common ---
-                    machine=qapi.MicroVM(acpi=False),
-                    no_reboot=True,
-                    enable_kvm=True,
-                    cpu="host",
-                    memory="2G",
-                    smp=2,
-                    kernel=kernel_fpath,
-                    initrd=initrd_fpath,
-                    append=kernel_cmdline,
-                    nodefaults=True,
-                    no_user_config=True,
-                    display="none",
-                    serial=[qapi.ChardevFile(path=log_fpath)],
-                    qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
-                    pidfile=pidfile_fpath,
-                    daemonize=True,
-                    sandbox=True,
-                    # --- use case specific ---
-                    drives=[
-                        qapi.Drive(id="root", file=golden_fpath, format="qcow2", interface="none"),
-                        qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
-                    ],
-                    netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
-                    devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
-                )
+            
+            import thirdparty.qemu.qapi as qapi
+            qemu_cmd_obj = qapi.QemuCommand(
+                # --- common ---
+                machine=qapi.MicroVM(acpi=False),
+                no_reboot=True,
+                enable_kvm=True,
+                cpu="host",
+                memory="2G",
+                smp=2,
+                kernel=kernel_fpath,
+                initrd=initrd_fpath,
+                append=kernel_cmdline,
+                nodefaults=True,
+                no_user_config=True,
+                display="none",
+                serial=[qapi.ChardevFile(path=log_fpath)],
+                qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
+                pidfile=pidfile_fpath,
+                daemonize=True,
+                sandbox=True,
+                # --- use case specific ---
+                drives=[
+                    qapi.Drive(id="root", file=base_image_fpath, format="qcow2", interface="none"),
+                    qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
+                ],
+                netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
+                devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
+            )
 
-                print(f"qemu command: {qemu_cmd_obj.to_shell()}")
-                return qemu_cmd_obj
-            qemu_cmd_obj = build_qemu_command()
+            print(f"base-image qemu command: {qemu_cmd_obj.to_shell()}")
 
             try:
                 ssh_host_port_fpath.parent.mkdir(parents=True, exist_ok=True)
@@ -299,8 +269,99 @@ class IzbaCrtProfile(BaseProfile):
                 run_and_follow_with_pidfile(qemu_cmd_obj.to_args(), log_fpath, pidfile_fpath)
 
             except Exception as e:
-                print(f"Error: {e}")
                 # TODO: Unlink golden image.
+                print(f"Error: {e}")
+                import traceback
+                traceback.print_exc()
+                # breakpoint()
+
+            ### Create the origin-overlay
+            import thirdparty.qemu.img as qimg
+            qemu_img_cmd = qimg.Create(
+                quiet=True,
+                format="qcow2",
+                backing_format="qcow2",
+                backing_file=(izba.inst_path / "images" / "base-image.qcow2"),
+                filename=(izba.inst_path / "images" / "origin-overlay.qcow2"))
+            
+            print(qemu_img_cmd.to_shell())
+            from thirdparty.izba.subprocess import run_with_timeout
+            qemu_img_timeout = 30
+            rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
+            print(f"rc: {rc} timedout: {timedout}")
+            print(f"stdout:\n{out}\nstderr:\n{err}")
+            print("---")
+
+            ### Do first boot of origin-overlay
+
+            import time
+            real_log_fpath = Path("logs") / "console" / f"console-{int(time.time())}.log"
+            log_fpath = Path("logs") / f"console.log"
+            log_fpath.unlink(missing_ok=True)
+            log_fpath.symlink_to(Path("console") / real_log_fpath.name)
+
+            origin_overlay_fpath = Path("images") / "origin-overlay.qcow2"
+
+            from thirdparty.izba.network import find_free_port
+            ssh_host_port = find_free_port(2222)
+            ssh_host_port_fpath = Path("run") / "ssh_host_port"
+
+            import thirdparty.qemu.qapi as qapi
+            qemu_cmd_obj = qapi.QemuCommand(
+                # --- common ---
+                machine=qapi.MicroVM(acpi=False),
+                no_reboot=True,
+                enable_kvm=True,
+                cpu="host",
+                memory="2G",
+                smp=2,
+                kernel=kernel_fpath,
+                initrd=initrd_fpath,
+                append=kernel_cmdline,
+                nodefaults=True,
+                no_user_config=True,
+                display="none",
+                serial=[qapi.ChardevFile(path=log_fpath)],
+                qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
+                pidfile=pidfile_fpath,
+                daemonize=True,
+                sandbox=True,
+                # --- use case specific ---
+                drives=[
+                    qapi.Drive(id="root", file=origin_overlay_fpath, format="qcow2", interface="none"),
+                    qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
+                ],
+                netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
+                devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
+            )
+
+            print(f"origin-overlay qemu command: {qemu_cmd_obj.to_shell()}")
+
+            try:
+                ssh_host_port_fpath.parent.mkdir(parents=True, exist_ok=True)
+                ssh_host_port_fpath.write_text(f"{ssh_host_port}\n")
+                # from thirdparty.izba.subprocess import run_and_follow_with_pidfile
+                # run_and_follow_with_pidfile(qemu_cmd_obj.to_args(), log_fpath, pidfile_fpath)
+                import subprocess
+                #* Daemonized qemu causes this to return quickly.
+                subprocess.run(qemu_cmd_obj.to_args())
+
+                from thirdparty.izba.subprocess.ssh import pidfile_ssh_wait
+                pidfile_fpath = self.inst_path / "run" / "qemu.pid"
+                ssh_host_port = int((self.inst_path / "run" / "ssh_host_port").read_text().strip())
+                print(f"Waiting for SSH. port {ssh_host_port} pidfile {pidfile_fpath} ")
+                # Implicitly waits for 5 minutes.
+                identity_fpath = self.inst_path / "misc" / "ssh" / "id_ed25519"
+                pidfile_ssh_wait(pidfile=pidfile_fpath, port=ssh_host_port, identity_fpath=identity_fpath)
+
+                #* At this point we should be able to take RAM snapshot and shutdown qemu.
+
+
+            except Exception as e:
+                # TODO: Unlink golden image.
+                print(f"Error: {e}")
+                import traceback
+                traceback.print_exc()
                 # breakpoint()
 
 
@@ -309,23 +370,23 @@ class IzbaCrtProfile(BaseProfile):
     def prepare_instance_disk_image(self, izba):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
         
-        import thirdparty.qemu.img as qimg
+        # import thirdparty.qemu.img as qimg
 
-        qemu_img_cmd = qimg.Create(
-            quiet=True,
-            format="qcow2",
-            backing_format="qcow2",
-            backing_file=(izba.gold_path / "golden.qcow2"),
-            filename=(izba.inst_path / "instance.qcow2"),
-            size="10G")
+        # qemu_img_cmd = qimg.Create(
+        #     quiet=True,
+        #     format="qcow2",
+        #     backing_format="qcow2",
+        #     backing_file=(izba.gold_path / "golden.qcow2"),
+        #     filename=(izba.inst_path / "instance.qcow2"),
+        #     size="10G")
         
-        print(qemu_img_cmd.to_shell())
-        from thirdparty.izba.subprocess import run_with_timeout
-        qemu_img_timeout = 30
-        rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
-        print(f"rc: {rc} timedout: {timedout}")
-        print(f"stdout:\n{out}\nstderr:\n{err}")
-        print("---")
+        # print(qemu_img_cmd.to_shell())
+        # from thirdparty.izba.subprocess import run_with_timeout
+        # qemu_img_timeout = 30
+        # rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
+        # print(f"rc: {rc} timedout: {timedout}")
+        # print(f"stdout:\n{out}\nstderr:\n{err}")
+        # print("---")
 
 
     # Starts the VM and leaves running until kill or stop.
@@ -333,165 +394,165 @@ class IzbaCrtProfile(BaseProfile):
 
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        import os
-        from pathlib import Path
+        # import os
+        # from pathlib import Path
 
-        '''
-            Golden boot:  ds=nocloud;s=/var/lib/cloud/seed/nocloud/;i=golden
-                        -> set everything up, place final user-data/meta-data in seed dir
-                        -> cloud-init clean --logs; reset machine-id/host keys; poweroff
+        # '''
+        #     Golden boot:  ds=nocloud;s=/var/lib/cloud/seed/nocloud/;i=golden
+        #                 -> set everything up, place final user-data/meta-data in seed dir
+        #                 -> cloud-init clean --logs; reset machine-id/host keys; poweroff
 
-            Each clone:   qemu-img create -f qcow2 -b root.qcow2 -F qcow2 vm1.qcow2
-                        ds=nocloud;s=/var/lib/cloud/seed/nocloud/;i=vm1-<uniq>
-                        -> first boot
+        #     Each clone:   qemu-img create -f qcow2 -b root.qcow2 -F qcow2 vm1.qcow2
+        #                 ds=nocloud;s=/var/lib/cloud/seed/nocloud/;i=vm1-<uniq>
+        #                 -> first boot
             
-            sudo cloud-init clean --logs
-            cloud-init query instance-id
-            cat /var/lib/cloud/data/instance-id
-            sudo truncate -s 0 /etc/machine-id
-            sudo rm -f /etc/ssh/ssh_host_*
-        '''
+        #     sudo cloud-init clean --logs
+        #     cloud-init query instance-id
+        #     cat /var/lib/cloud/data/instance-id
+        #     sudo truncate -s 0 /etc/machine-id
+        #     sudo rm -f /etc/ssh/ssh_host_*
+        # '''
 
-        def build_kernel_cmdline():
-            # provision VM with seed ISO
-            kernel_modules = ','.join([
-                "virtio_mmio",
-                "virtio_blk",
-                "virtio_net",
-                "ext4",
-                # ?? "virtiofs", # CONFIG_VIRTIO_FS (since Linux 5.4) deps: fuse, virtio_pci
-            ])
-            kernel_root = "LABEL=cloudimg-rootfs"
-            kernel_rootfstype = "ext4"
-            return ' '.join([
-                f"root={kernel_root}",
-                #f"rootfstype={kernel_rootfstype}",
-                "rw",
-                "console=ttyS0",
-                "panic=1",
-                #f"modules={kernel_modules}",
-                "reboot=t", #"reboot=k",
-                "random.trust_cpu=on",
-            ])
-        kernel_cmdline = build_kernel_cmdline()
-
-
-        # Arguments too long if we don't change folders.
-        from thirdparty.izba.subprocess import workdir
-        with workdir(izba.inst_path):
-            # do stuff
-
-            # Note: Arguments deliberately hard coded as relative to self.path
-            # TODO: Consider dynamically calculating relative paths.
-            import time
-            real_log_fpath = Path("logs") / f"instance-console-{int(time.time())}.log"
-            log_fpath = Path("logs") / f"instance-console.log"
-            log_fpath.unlink(missing_ok=True)
-            log_fpath.symlink_to(real_log_fpath.name)
-
-            instance_fpath = Path("instance.qcow2")
-            seed_fpath = Path("seed.iso")
-            pidfile_fpath = Path("run") / "instance.pid"
-            qmp_fpath = Path("run") / "instance.qmp"
-            kernel_fpath = Path("vmlinuz")
-            initrd_fpath = Path("initrd.img")
-            from thirdparty.izba.network import find_free_port
-            ssh_host_port = find_free_port(2222)
-            ssh_host_port_fpath = Path("run") / "ssh_host_port"
-
-            # TODO: Add all the restictions associated with --network opt
-            def build_qemu_command():
-                import thirdparty.qemu.qapi as qapi
-                qemu_cmd_obj = qapi.QemuCommand(
-                    # --- common ---
-                    machine=qapi.MicroVM(acpi=False),
-                    no_reboot=True,
-                    enable_kvm=True,
-                    cpu="host",
-                    memory="2G",
-                    smp=2,
-                    kernel=kernel_fpath,
-                    initrd=initrd_fpath,
-                    append=kernel_cmdline,
-                    nodefaults=True,
-                    no_user_config=True,
-                    display="none",
-                    serial=[qapi.ChardevFile(path=log_fpath)],
-                    qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
-                    pidfile=pidfile_fpath,
-                    daemonize=True,
-                    sandbox=True,
-                    # --- use case specific ---
-                    drives=[
-                        qapi.Drive(id="root", file=instance_fpath, format="qcow2", interface="none"),
-                        qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
-                    ],
-                    netdevs=[
-                        qapi.NetdevUser(id="n0", hostfwd=[
-                            qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)
-                        ])
-                    ],
-                    devices=[
-                        qapi.VirtioBlk(drive="root"),
-                        qapi.VirtioBlk(drive="seed"),
-                        qapi.VirtioNet(netdev="n0"),
-                        qapi.VirtioRng()
-                    ],
-                )
-
-                print(f"qemu command: {qemu_cmd_obj.to_shell()}")
-                return qemu_cmd_obj
-            qemu_cmd_obj = build_qemu_command()
-
-            try:
-                ssh_host_port_fpath.parent.mkdir(parents=True, exist_ok=True)
-                ssh_host_port_fpath.write_text(f"{ssh_host_port}\n")
-                if console == 'stdout':
-                    from thirdparty.izba.subprocess import run_and_follow_with_pidfile
-                    run_and_follow_with_pidfile(qemu_cmd_obj.to_args(), log_fpath, pidfile_fpath)
-                elif console == 'none':
-                    # TODO: Technically this passed the console to stdout, but if we daemonize
-                    # TODO: the qemu process, it should immediately return.
-                    import subprocess
-                    subprocess.run(qemu_cmd_obj.to_args())
+        # def build_kernel_cmdline():
+        #     # provision VM with seed ISO
+        #     kernel_modules = ','.join([
+        #         "virtio_mmio",
+        #         "virtio_blk",
+        #         "virtio_net",
+        #         "ext4",
+        #         # ?? "virtiofs", # CONFIG_VIRTIO_FS (since Linux 5.4) deps: fuse, virtio_pci
+        #     ])
+        #     kernel_root = "LABEL=cloudimg-rootfs"
+        #     kernel_rootfstype = "ext4"
+        #     return ' '.join([
+        #         f"root={kernel_root}",
+        #         #f"rootfstype={kernel_rootfstype}",
+        #         "rw",
+        #         "console=ttyS0",
+        #         "panic=1",
+        #         #f"modules={kernel_modules}",
+        #         "reboot=t", #"reboot=k",
+        #         "random.trust_cpu=on",
+        #     ])
+        # kernel_cmdline = build_kernel_cmdline()
 
 
-            except Exception as e:
-               print(f"Error: {e}")
-               import traceback
-               traceback.print_exc()
-               # breakpoint()
+        # # Arguments too long if we don't change folders.
+        # from thirdparty.izba.subprocess import workdir
+        # with workdir(izba.inst_path):
+        #     # do stuff
 
-        # finally:
-        #     # Revert back to old working folder.
-        #     os.chdir(prev_wd)
+        #     # Note: Arguments deliberately hard coded as relative to self.path
+        #     # TODO: Consider dynamically calculating relative paths.
+        #     import time
+        #     real_log_fpath = Path("logs") / f"instance-console-{int(time.time())}.log"
+        #     log_fpath = Path("logs") / f"instance-console.log"
+        #     log_fpath.unlink(missing_ok=True)
+        #     log_fpath.symlink_to(real_log_fpath.name)
+
+        #     instance_fpath = Path("instance.qcow2")
+        #     seed_fpath = Path("seed.iso")
+        #     pidfile_fpath = Path("run") / "instance.pid"
+        #     qmp_fpath = Path("run") / "instance.qmp"
+        #     kernel_fpath = Path("vmlinuz")
+        #     initrd_fpath = Path("initrd.img")
+        #     from thirdparty.izba.network import find_free_port
+        #     ssh_host_port = find_free_port(2222)
+        #     ssh_host_port_fpath = Path("run") / "ssh_host_port"
+
+        #     # TODO: Add all the restictions associated with --network opt
+        #     def build_qemu_command():
+        #         import thirdparty.qemu.qapi as qapi
+        #         qemu_cmd_obj = qapi.QemuCommand(
+        #             # --- common ---
+        #             machine=qapi.MicroVM(acpi=False),
+        #             no_reboot=True,
+        #             enable_kvm=True,
+        #             cpu="host",
+        #             memory="2G",
+        #             smp=2,
+        #             kernel=kernel_fpath,
+        #             initrd=initrd_fpath,
+        #             append=kernel_cmdline,
+        #             nodefaults=True,
+        #             no_user_config=True,
+        #             display="none",
+        #             serial=[qapi.ChardevFile(path=log_fpath)],
+        #             qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
+        #             pidfile=pidfile_fpath,
+        #             daemonize=True,
+        #             sandbox=True,
+        #             # --- use case specific ---
+        #             drives=[
+        #                 qapi.Drive(id="root", file=instance_fpath, format="qcow2", interface="none"),
+        #                 qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
+        #             ],
+        #             netdevs=[
+        #                 qapi.NetdevUser(id="n0", hostfwd=[
+        #                     qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)
+        #                 ])
+        #             ],
+        #             devices=[
+        #                 qapi.VirtioBlk(drive="root"),
+        #                 qapi.VirtioBlk(drive="seed"),
+        #                 qapi.VirtioNet(netdev="n0"),
+        #                 qapi.VirtioRng()
+        #             ],
+        #         )
+
+        #         print(f"qemu command: {qemu_cmd_obj.to_shell()}")
+        #         return qemu_cmd_obj
+        #     qemu_cmd_obj = build_qemu_command()
+
+        #     try:
+        #         ssh_host_port_fpath.parent.mkdir(parents=True, exist_ok=True)
+        #         ssh_host_port_fpath.write_text(f"{ssh_host_port}\n")
+        #         if console == 'stdout':
+        #             from thirdparty.izba.subprocess import run_and_follow_with_pidfile
+        #             run_and_follow_with_pidfile(qemu_cmd_obj.to_args(), log_fpath, pidfile_fpath)
+        #         elif console == 'none':
+        #             # TODO: Technically this passed the console to stdout, but if we daemonize
+        #             # TODO: the qemu process, it should immediately return.
+        #             import subprocess
+        #             subprocess.run(qemu_cmd_obj.to_args())
+
+
+        #     except Exception as e:
+        #        print(f"Error: {e}")
+        #        import traceback
+        #        traceback.print_exc()
+        #        # breakpoint()
+
+        # # finally:
+        # #     # Revert back to old working folder.
+        # #     os.chdir(prev_wd)
 
 
     # Stops the VM.
     def stop_instance_vm(self, izba):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
-        print(f"base_path: {izba.base_path}")
-        print(f"profiles_path: {izba.profiles_path}")
-        raise NotImplementedError()
+        # print(f"base_path: {izba.base_path}")
+        # print(f"profiles_path: {izba.profiles_path}")
+        # raise NotImplementedError()
 
 
     # Executes command in VM (via SSH)
     def exec_instance_vm(self, izba):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
-        print(f"base_path: {izba.base_path}")
-        print(f"profiles_path: {izba.profiles_path}")
-        raise NotImplementedError()
+        # print(f"base_path: {izba.base_path}")
+        # print(f"profiles_path: {izba.profiles_path}")
+        # raise NotImplementedError()
 
 
     # Starts VM, runs a single script, shuts down VM.
     def run_instance_vm(self, izba):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
-        print(f"base_path: {izba.base_path}")
-        print(f"profiles_path: {izba.profiles_path}")
-        raise NotImplementedError()
+        # print(f"base_path: {izba.base_path}")
+        # print(f"profiles_path: {izba.profiles_path}")
+        # raise NotImplementedError()
 
 
-    def _build_golden_cloud_config(self, izba, reboot : bool = True):
+    def _build_base_cloud_config(self, izba, reboot : bool = True):
         import shlex
         import thirdparty.qemu.cloud_init.cloud_config as cc
 
@@ -516,14 +577,14 @@ class IzbaCrtProfile(BaseProfile):
                     name="user",
                     shell="/bin/sh",
                     lock_passwd=False,
-                    ssh_authorized_keys=[open(izba.gold_path / "context" / "keys" / "id_ed25519.pub").read()],
+                    ssh_authorized_keys=[open(izba.inst_path / "misc" / "ssh" / "id_ed25519.pub").read()],
                     passwd='gofish',
                 ),
                 cc.Users(
                     name="root",
                     shell="/bin/sh",
                     lock_passwd=False,
-                    ssh_authorized_keys=[open(izba.gold_path / "context" / "keys" / "id_ed25519.pub").read()],
+                    ssh_authorized_keys=[open(izba.inst_path / "misc" / "ssh" / "id_ed25519.pub").read()],
                     passwd='gofish',
                 ),
             ],
@@ -555,64 +616,64 @@ class IzbaCrtProfile(BaseProfile):
             power_state=power_state,
         )
     
-    def _build_instance_cloud_config(self, izba, reboot : bool = True):
-        import shlex
-        import thirdparty.qemu.cloud_init.cloud_config as cc
+    # def _build_instance_cloud_config(self, izba, reboot : bool = True):
+    #     import shlex
+    #     import thirdparty.qemu.cloud_init.cloud_config as cc
 
-        power_state = None
-        if reboot:
-            power_state = cc.PowerState(
-                mode=cc.Mode3.reboot,
-                message='provisioned',
-                timeout=30,
-                condition=True
-            )
+    #     power_state = None
+    #     if reboot:
+    #         power_state = cc.PowerState(
+    #             mode=cc.Mode3.reboot,
+    #             message='provisioned',
+    #             timeout=30,
+    #             condition=True
+    #         )
 
-        return cc.CloudConfig(
-            # OpenRC doesn't hand cloud-init's stdout/stderr to the console, so runcmd
-            # output would otherwise only land in the log file. Tee it to the serial
-            # console, which qemu writes to logs/console.log for tail_follow.
-            output=cc.Output(all="| tee -a /var/log/cloud-init-output.log /dev/ttyS0"),
-            disable_root=False,
-            ssh_pwauth=True,
-            users=[
-                cc.Users(
-                    name="user",
-                    shell="/bin/bash",
-                    lock_passwd=False,
-                    ssh_authorized_keys=[open(izba.inst_path / "context" / "keys" / "id_ed25519.pub").read()],
-                    passwd='gofish',
-                ),
-                cc.Users(
-                    name="root",
-                    shell="/bin/bash",
-                    lock_passwd=False,
-                    ssh_authorized_keys=[open(izba.inst_path / "context" / "keys" / "id_ed25519.pub").read()],
-                    passwd='gofish',
-                ),
-            ],
-            # write_files=[
-            #     cc.WriteFile(path=f"{GUEST_CONTEXT_DIR}/Dockerfile", content=self.dockerfile,
-            #                 permissions="0644"),
-            #     cc.WriteFile(path=f"{GUEST_CONTEXT_DIR}/build-image.sh", content=BUILD_IMAGE_SH,
-            #                 permissions="0755"),
-            #     cc.WriteFile(path="/etc/containers/registries.conf.d/00-crt.conf",
-            #                 content=REGISTRIES_CONF, permissions="0644"),
-            # ],
-            runcmd=[
-                # Mount seed iso
-                "mkdir -p /mnt/seed",
-                [ 'sh', '-c', r"mount -o ro $(findfs LABEL=cidata) /mnt/seed" ],
-                "ls -lR /mnt/seed",
-                "echo --- MOUNTED SEED CONTENTS ---",
+    #     return cc.CloudConfig(
+    #         # OpenRC doesn't hand cloud-init's stdout/stderr to the console, so runcmd
+    #         # output would otherwise only land in the log file. Tee it to the serial
+    #         # console, which qemu writes to logs/console.log for tail_follow.
+    #         output=cc.Output(all="| tee -a /var/log/cloud-init-output.log /dev/ttyS0"),
+    #         disable_root=False,
+    #         ssh_pwauth=True,
+    #         users=[
+    #             cc.Users(
+    #                 name="user",
+    #                 shell="/bin/bash",
+    #                 lock_passwd=False,
+    #                 ssh_authorized_keys=[open(izba.inst_path / "context" / "keys" / "id_ed25519.pub").read()],
+    #                 passwd='gofish',
+    #             ),
+    #             cc.Users(
+    #                 name="root",
+    #                 shell="/bin/bash",
+    #                 lock_passwd=False,
+    #                 ssh_authorized_keys=[open(izba.inst_path / "context" / "keys" / "id_ed25519.pub").read()],
+    #                 passwd='gofish',
+    #             ),
+    #         ],
+    #         # write_files=[
+    #         #     cc.WriteFile(path=f"{GUEST_CONTEXT_DIR}/Dockerfile", content=self.dockerfile,
+    #         #                 permissions="0644"),
+    #         #     cc.WriteFile(path=f"{GUEST_CONTEXT_DIR}/build-image.sh", content=BUILD_IMAGE_SH,
+    #         #                 permissions="0755"),
+    #         #     cc.WriteFile(path="/etc/containers/registries.conf.d/00-crt.conf",
+    #         #                 content=REGISTRIES_CONF, permissions="0644"),
+    #         # ],
+    #         runcmd=[
+    #             # Mount seed iso
+    #             "mkdir -p /mnt/seed",
+    #             [ 'sh', '-c', r"mount -o ro $(findfs LABEL=cidata) /mnt/seed" ],
+    #             "ls -lR /mnt/seed",
+    #             "echo --- MOUNTED SEED CONTENTS ---",
 
-                # # podman lives in the community repo; enable it if the image hasn't.
-                # "grep -q '^[^#].*/community$' /etc/apk/repositories"
-                # " || sed -n 's#/main$#/community#p' /etc/apk/repositories >> /etc/apk/repositories",
-                # "apk add --no-cache podman fuse-overlayfs slirp4netns",
-                # "rc-service cgroups start",
-                # shlex.join(["/bin/sh", f"{GUEST_CONTEXT_DIR}/build-image.sh",
-                #             GUEST_CONTEXT_DIR, self.tag, GUEST_OUT_SERIAL]),
-            ],
-            power_state=power_state,
-        )
+    #             # # podman lives in the community repo; enable it if the image hasn't.
+    #             # "grep -q '^[^#].*/community$' /etc/apk/repositories"
+    #             # " || sed -n 's#/main$#/community#p' /etc/apk/repositories >> /etc/apk/repositories",
+    #             # "apk add --no-cache podman fuse-overlayfs slirp4netns",
+    #             # "rc-service cgroups start",
+    #             # shlex.join(["/bin/sh", f"{GUEST_CONTEXT_DIR}/build-image.sh",
+    #             #             GUEST_CONTEXT_DIR, self.tag, GUEST_OUT_SERIAL]),
+    #         ],
+    #         power_state=power_state,
+    #     )
