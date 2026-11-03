@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import logging
+log = logging.getLogger(__name__)
+
 import sys
 from pathlib import Path
 
@@ -16,7 +19,7 @@ UBUNTU_NOBLE_FNAME = "noble-server-cloudimg-amd64.img"
 UBUNTU_BOOT_FILES = ["/boot/vmlinuz", "/boot/initrd.img"]
 
 # Written in an overlay folder once it has been resumed from origin-overlay.state.
-ORIGIN_RESUMED_MARKER = Path("run") / "origin-state-resumed"
+ORIGIN_RESUMED_MARKER = Path("run") / "origin-state-resumed" 
 
 
 def register_profile_crt(profile_index: ProfileIndex):
@@ -47,7 +50,7 @@ class IzbaCrtProfile(BaseProfile):
     # Download the base image we'll base golden and instance images from.
     # Depends on cached target, internet, or available mirror.
     def cache_base(self, izba, url=UBUNTU_NOBLE_URL, fname=UBUNTU_NOBLE_FNAME):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         self.base_img_path = izba.base_path / "cache" / "downloads" / fname
 
@@ -66,7 +69,7 @@ class IzbaCrtProfile(BaseProfile):
     # Depends on: generate_ssh_keys()
     # TODO: Do we need a golden version and an instance version?
     def prepare_base_guest_data(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         from thirdparty.izba.keys import generate_ssh_keys
         generate_ssh_keys(izba.inst_path / "misc" / "ssh")
@@ -77,7 +80,7 @@ class IzbaCrtProfile(BaseProfile):
     # Build cloud config representative of the profile's use case.
     # Depends on: prepare_guest_data()
     def prepare_base_cloud_config(self, izba, reboot : bool = True):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         self.cloud_init_user_data = self._build_base_cloud_config(izba, reboot=self.firstboot_reboot)
 
@@ -95,7 +98,7 @@ class IzbaCrtProfile(BaseProfile):
     # Note: user ssh keys already included in seed
     # Depends on: prepare_guest_data()
     def build_base_context_folder(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         # import shutil
         # shutil.copytree(izba.gold_path / "keys", izba.gold_path / "import", dirs_exist_ok=True)
@@ -110,7 +113,7 @@ class IzbaCrtProfile(BaseProfile):
     # - import/
     # Depends on: prepare_cloud_config(), build_import_folder()
     def build_base_seed_image(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         from thirdparty.qemu.cloud_init import make_seed
         from thirdparty.qemu.cloud_init.cloud_config import cloud_config_to_yaml
@@ -133,7 +136,7 @@ class IzbaCrtProfile(BaseProfile):
     # Depends on: cache_base
     def prepare_base_disk_image(self, izba):
         
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         
         import thirdparty.qemu.img as qimg
 
@@ -145,15 +148,15 @@ class IzbaCrtProfile(BaseProfile):
             filename=(izba.inst_path / "images" / "base-image.qcow2"),
             size="10G")
         
-        print(qemu_img_cmd.to_shell())
+        log.debug(qemu_img_cmd.to_shell())
         from thirdparty.izba.subprocess import run_with_timeout
         qemu_img_timeout = 30
         rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
 
         if rc != 0:
-            print(f"rc: {rc} timedout: {timedout}")
-            print(f"stdout:\n{out}\nstderr:\n{err}")
-            print("---")
+            log.debug(f"rc: {rc} timedout: {timedout}")
+            log.debug(f"stdout:\n{out}\nstderr:\n{err}")
+            log.debug("---")
 
         from thirdparty.izba.extraction import extract_from_disk_image
         # TODO: Consider moving the KERNEL_FILES to prepare_* functions.
@@ -231,7 +234,7 @@ class IzbaCrtProfile(BaseProfile):
                 devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
             )
 
-            print(f"base-image qemu command: {qemu_cmd_obj.to_shell()}")
+            log.debug(f"base-image qemu command: {qemu_cmd_obj.to_shell()}")
 
             qemu_build_base_image_command_fpath = izba.inst_path / "artifacts" / "qemu_build_base_image.sh"
             qemu_build_base_image_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd_obj.to_shell()}")
@@ -244,7 +247,7 @@ class IzbaCrtProfile(BaseProfile):
 
             except Exception as e:
                 # TODO: Unlink golden image.
-                print(f"Error: {e}")
+                log.error(f"Error: {e}")
                 import traceback
                 traceback.print_exc()
                 # breakpoint()
@@ -262,16 +265,16 @@ class IzbaCrtProfile(BaseProfile):
             backing_file=(izba.inst_path / "images" / "base-image.qcow2"),
             filename=(izba.inst_path / "images" / "origin-overlay.qcow2"))
         
-        print(qemu_img_cmd.to_shell())
+        log.debug(qemu_img_cmd.to_shell())
         create_origin_overlay_command_fpath = izba.inst_path / "artifacts" / "create_origin_overlay.sh"
         create_origin_overlay_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_img_cmd.to_shell()}")
 
         from thirdparty.izba.subprocess import run_with_timeout
         qemu_img_timeout = 30
         rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
-        print(f"rc: {rc} timedout: {timedout}")
-        print(f"stdout:\n{out}\nstderr:\n{err}")
-        print("---")
+        log.debug(f"rc: {rc} timedout: {timedout}")
+        log.debug(f"stdout:\n{out}\nstderr:\n{err}")
+        log.debug("---")
 
         return True
 
@@ -367,7 +370,7 @@ class IzbaCrtProfile(BaseProfile):
                        "qio_channel_file*"],
             )
 
-            print(f"origin-overlay qemu command: {qemu_cmd_obj.to_shell()}")
+            log.debug(f"origin-overlay qemu command: {qemu_cmd_obj.to_shell()}")
             qemu_init_origin_overlay_command_fpath = izba.inst_path / "artifacts" / "qemu_init_origin_overlay.sh"
             qemu_init_origin_overlay_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd_obj.to_shell()}")
 
@@ -385,7 +388,7 @@ class IzbaCrtProfile(BaseProfile):
 
                 # --- Wait for cloud-init to complete and sshd to be ready. ---
                 from thirdparty.izba.subprocess.ssh import pidfile_ssh_wait
-                print(f"Waiting for SSH. port {ssh_host_port} pidfile {pidfile_fpath} ")
+                log.debug(f"Waiting for SSH. port {ssh_host_port} pidfile {pidfile_fpath} ")
                 # Implicitly waits for 5 minutes.
                 identity_fpath = Path("misc") / "ssh" / "id_ed25519"
                 pidfile_ssh_wait(pidfile=pidfile_fpath, port=ssh_host_port, identity_fpath=identity_fpath)
@@ -418,7 +421,7 @@ class IzbaCrtProfile(BaseProfile):
                         mon.execute(qmp.Migrate(uri=f"file:{state_fpath}"))
                         info = mon.wait_migration()
                         ram_bytes = info.ram.transferred if info.ram else "?"
-                        print(f"Saved VM state to {state_fpath} ({ram_bytes} bytes RAM transferred)")
+                        log.info(f"Saved VM state to {state_fpath} ({ram_bytes} bytes RAM transferred)")
                     except Exception as e:
                         migrate_error = e
                         # While QEMU is still up: its view of the VM and of the failed migration.
@@ -434,8 +437,8 @@ class IzbaCrtProfile(BaseProfile):
                     _append_host_diagnostics(diag_fpath, qemu_cmd_obj, state_fpath,
                                              [qemu_stderr_fpath, qemu_debug_fpath])
                     state_fpath.unlink(missing_ok=True)
-                    print(diag_fpath.read_text())
-                    print(f"QEMU diagnostics written to {diag_fpath.resolve()}")
+                    log.debug(diag_fpath.read_text())
+                    log.debug(f"QEMU diagnostics written to {diag_fpath.resolve()}")
                     raise migrate_error
                 if not exited:
                     raise RuntimeError(f"QEMU (pid {qemu_pid}) did not exit after QMP quit")
@@ -443,7 +446,7 @@ class IzbaCrtProfile(BaseProfile):
 
             except Exception as e:
                 # TODO: Unlink golden image.
-                print(f"Error: {e}")
+                log.error(f"Error: {e}")
                 import traceback
                 traceback.print_exc()
                 # breakpoint()
@@ -452,7 +455,7 @@ class IzbaCrtProfile(BaseProfile):
     # Runs the VM and shuts down when complete.
     # Depends on: prepare_golden(), build_seed_image()
     def build_base_disk_image(self, izba, name='default', **opts):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         self._qemu_build_base_image(izba)
         self._create_origin_overlay(izba)
@@ -462,7 +465,7 @@ class IzbaCrtProfile(BaseProfile):
     # Copy/adjust the golden to the instance
     # Depends on: build_golden(self)
     def prepare_overlay_disk_image(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         
         # import thirdparty.qemu.img as qimg
 
@@ -474,13 +477,13 @@ class IzbaCrtProfile(BaseProfile):
         #     filename=(izba.inst_path / "instance.qcow2"),
         #     size="10G")
         
-        # print(qemu_img_cmd.to_shell())
+        # log.debug(qemu_img_cmd.to_shell())
         # from thirdparty.izba.subprocess import run_with_timeout
         # qemu_img_timeout = 30
         # rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
-        # print(f"rc: {rc} timedout: {timedout}")
-        # print(f"stdout:\n{out}\nstderr:\n{err}")
-        # print("---")
+        # log.debug(f"rc: {rc} timedout: {timedout}")
+        # log.debug(f"stdout:\n{out}\nstderr:\n{err}")
+        # log.debug("---")
 
         import shutil
         import tempfile
@@ -511,7 +514,7 @@ class IzbaCrtProfile(BaseProfile):
             backing_file=origin_fpath,
             filename=overlay_image_fpath)
 
-        print(qemu_img_cmd.to_shell())
+        log.debug(qemu_img_cmd.to_shell())
         # TODO: Consider artifacts folder in overlay folder?
         prepare_overlay_disk_image_command_fpath = izba.overlay_path / "logs" / "prepare_overlay_disk_image.sh"
         prepare_overlay_disk_image_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_img_cmd.to_shell()}")
@@ -521,9 +524,9 @@ class IzbaCrtProfile(BaseProfile):
         rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
 
         if rc != 0 or timedout:
-            print(f"rc: {rc} timedout: {timedout}")
-            print(f"stdout:\n{out}\nstderr:\n{err}")
-            print("---")
+            log.debug(f"rc: {rc} timedout: {timedout}")
+            log.debug(f"stdout:\n{out}\nstderr:\n{err}")
+            log.debug("---")
 
             print(f"Failed to create overlay image; removing {overlay_image_fpath}")
             shutil.rmtree(overlay_image_fpath, ignore_errors=True)
@@ -538,7 +541,7 @@ class IzbaCrtProfile(BaseProfile):
     # build_base_disk_image) on top of a fresh overlay disk created by Izba.create().
     def start_instance_vm(self, izba, console='stdout', **opts):
 
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         import subprocess
         import time
@@ -638,7 +641,7 @@ class IzbaCrtProfile(BaseProfile):
                 incoming=f"file:{state_fpath}",
                 msg_timestamp=True,
             )
-            print(f"instance qemu command: {qemu_cmd_obj.to_shell()}")
+            log.debug(f"instance qemu command: {qemu_cmd_obj.to_shell()}")
             # TODO: Consider artifacts folder in overlay folder?
             start_instance_vm_command_fpath = izba.overlay_path / "logs" / "start_instance_vm.sh"
             start_instance_vm_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd_obj.to_shell()}")
@@ -650,7 +653,7 @@ class IzbaCrtProfile(BaseProfile):
                 ssh_host_port_fpath.write_text(f"{ssh_host_port}\n")
                 rc = subprocess.run(qemu_cmd_obj.to_args(), stdout=qemu_stderr, stderr=qemu_stderr).returncode
             if rc != 0:
-                print(f"qemu exited with {rc}:\n{qemu_stderr_fpath.read_text()}")
+                log.error(f"qemu exited with {rc}:\n{qemu_stderr_fpath.read_text()}")
                 return False
 
             # TODO: This seems like overkill atm?
@@ -659,10 +662,8 @@ class IzbaCrtProfile(BaseProfile):
             # QEMU exits, so watch the pid as well.
             pid = read_pid(pidfile_fpath)
 
-
-
-
-
+            # Since we snapshot the state while paused, it starts paused and we must
+            # send the 'cont' message to unpause the system.
             status = None
             deadline = time.monotonic() + 120
             try:
@@ -671,6 +672,11 @@ class IzbaCrtProfile(BaseProfile):
                         status = mon.execute(qmp.QueryStatus()).status
                         if status == "running":
                             break
+                        # The state was saved with the guest stopped, so once the load
+                        # completes it comes back "paused"; poke it to continue.
+                        if status == "paused":
+                            mon.execute(qmp.Cont())
+                            continue
                         time.sleep(0.2)
             except (OSError, ConnectionError) as e:
                 status = f"QMP lost ({e})"
@@ -678,13 +684,8 @@ class IzbaCrtProfile(BaseProfile):
                 alive = pid is not None and is_alive(pid)
                 print(f"VM did not resume from {state_fpath} (status: {status}, qemu "
                       f"{'still running' if alive else 'exited'}).")
-                print(f"qemu stderr:\n{qemu_stderr_fpath.read_text()}")
+                log.error(f"qemu stderr:\n{qemu_stderr_fpath.read_text()}")
                 return False
-
-
-
-
-
 
             print(f"Resumed {izba.profile_name}:{izba.profile_inst}/{izba.overlay_name} (pid {pid}); "
                   f"ssh -p {ssh_host_port} user@127.0.0.1")
@@ -700,7 +701,7 @@ class IzbaCrtProfile(BaseProfile):
 
     # Stops the VM.
     def stop_instance_vm(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         # print(f"base_path: {izba.base_path}")
         # print(f"profiles_path: {izba.profiles_path}")
         # raise NotImplementedError()
@@ -717,7 +718,7 @@ class IzbaCrtProfile(BaseProfile):
             pid_shutdown(pid)
 
             # Blocking until qemu exits.
-            print("Blocking until stop complete.", end='')
+            log.info("Blocking until stop complete.", end='')
             import time
             from thirdparty.izba.subprocess import read_pid, is_alive
             from thirdparty.izba.subprocess.qemu import is_qemu_process
@@ -725,13 +726,13 @@ class IzbaCrtProfile(BaseProfile):
             pid = read_pid(pidfile_fpath)
             while pid is not None and is_alive(pid) and is_qemu_process(pid):
                 pid = read_pid(pidfile_fpath)
-                time.sleep(2)
-                print('.', end='')
-            print("\nStop complete.")
+                time.sleep(0.2)
+                log.info('.', end='')
+            logging.info("\nStop complete.")
 
-            print(f"Overlay {izba.overlay_name} shutdown.")
+            log.info(f"Overlay {izba.overlay_name} shutdown.")
         else:
-            print(f"Overlay {izba.overlay_name} is not running")
+            log.info(f"Overlay {izba.overlay_name} is not running")
 
 
     # Executes command in VM (via SSH)
@@ -769,9 +770,19 @@ class IzbaCrtProfile(BaseProfile):
         return False
 
 
+    def run_ready_wait(self, izba):
+        from thirdparty.izba.subprocess.ssh import pidfile_ssh_wait
+        pidfile_fpath = izba.overlay_path / "run" / "qemu.pid"
+        ssh_host_port = int((izba.overlay_path / "run" / "ssh_host_port").read_text().strip())
+        log.info(f"Waiting for SSH. port {ssh_host_port} pidfile {pidfile_fpath} ")
+        # Implicitly waits for 5 minutes.
+        identity_fpath = izba.inst_path / "misc" / "ssh" / "id_ed25519"
+        pidfile_ssh_wait(pidfile=pidfile_fpath, port=ssh_host_port, identity_fpath=identity_fpath)
+
+
     # Starts VM, runs a single script, shuts down VM.
     def run_instance_vm(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         # print(f"base_path: {izba.base_path}")
         # print(f"profiles_path: {izba.profiles_path}")
         # raise NotImplementedError()
@@ -797,20 +808,25 @@ class IzbaCrtProfile(BaseProfile):
             output=cc.Output(all="| tee -a /var/log/cloud-init-output.log /dev/ttyS0"),
             disable_root=False,
             ssh_pwauth=True,
+            groups=["docker"],
             users=[
                 cc.Users(
                     name="user",
-                    shell="/bin/sh",
-                    lock_passwd=False,
+                    shell="/bin/bash",
+                    groups=["docker", "sudo"],
+                    sudo="ALL=(ALL) NOPASSWD:ALL", # ! Do we really want this?
                     ssh_authorized_keys=[open(izba.inst_path / "misc" / "ssh" / "id_ed25519.pub").read()],
-                    passwd='gofish',
+                    lock_passwd=True,
+                    #lock_passwd=False,
+                    #passwd='gofish',
                 ),
                 cc.Users(
                     name="root",
-                    shell="/bin/sh",
-                    lock_passwd=False,
+                    shell="/bin/bash",
                     ssh_authorized_keys=[open(izba.inst_path / "misc" / "ssh" / "id_ed25519.pub").read()],
-                    passwd='gofish',
+                    lock_passwd=True,
+                    #lock_passwd=False,
+                    #passwd='gofish',
                 ),
             ],
             # write_files=[
@@ -821,7 +837,22 @@ class IzbaCrtProfile(BaseProfile):
             #     cc.WriteFile(path="/etc/containers/registries.conf.d/00-crt.conf",
             #                 content=REGISTRIES_CONF, permissions="0644"),
             # ],
-            packages=["openssh-server"],
+            packages=[
+                "ca-certificates",
+                "curl",
+                # Docker
+                "docker-ce",
+                "docker-ce-cli",
+                "containerd.io",
+                "docker-buildx-plugin",
+                "docker-compose-plugin",
+                # Podman (rootless support)
+                "podman",
+                "uidmap",
+                "slirp4netns",
+                "fuse-overlayfs",
+                "passt",
+            ],
             runcmd=[
                 # Mount seed iso
                 "mkdir -p /mnt/seed",
@@ -831,13 +862,10 @@ class IzbaCrtProfile(BaseProfile):
                 # "mkdir -p /opt && cp -r /mnt/seed /opt/",
                 # "echo --- COPIED SEED CONTENTS ---",
 
-                # # podman lives in the community repo; enable it if the image hasn't.
-                # "grep -q '^[^#].*/community$' /etc/apk/repositories"
-                # " || sed -n 's#/main$#/community#p' /etc/apk/repositories >> /etc/apk/repositories",
-                # "apk add --no-cache podman fuse-overlayfs slirp4netns",
-                # "rc-service cgroups start",
-                # shlex.join(["/bin/sh", f"{GUEST_CONTEXT_DIR}/build-image.sh",
-                #             GUEST_CONTEXT_DIR, self.tag, GUEST_OUT_SERIAL]),
+                # enable container runtime daemon
+                "systemctl enable --now docker containerd",
+                # enable per-user service manager
+                "loginctl enable-linger user",
             ],
             power_state=power_state,
         )

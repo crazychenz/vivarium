@@ -291,7 +291,7 @@ def main():
     if config_path.exists():
         config = cfg.load_izba_config(config_path=config_path)
     else:
-        print(f"Config not found at: {config_path}, using defaults.")
+        log.info(f"Config not found at: {config_path}, using defaults.")
  
     # TODO: translate profile alias to Profile object and pass to func.
 
