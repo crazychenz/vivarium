@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+from pathlib import Path
 
 from thirdparty.izba.cli.registrar import ProfileIndex
 from thirdparty.izba.profile import BaseProfile
@@ -13,6 +14,9 @@ ALPINE_BOOT_FILES = ["/boot/vmlinuz-virt", "/boot/initramfs-virt"]
 UBUNTU_NOBLE_URL = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
 UBUNTU_NOBLE_FNAME = "noble-server-cloudimg-amd64.img"
 UBUNTU_BOOT_FILES = ["/boot/vmlinuz", "/boot/initrd.img"]
+
+# Written in an overlay folder once it has been resumed from origin-overlay.state.
+ORIGIN_RESUMED_MARKER = Path("run") / "origin-state-resumed"
 
 
 def register_profile_crt(profile_index: ProfileIndex):
@@ -52,6 +56,8 @@ class IzbaCrtProfile(BaseProfile):
             from thirdparty.izba.download import download_with_progress
             self.base_img_path.parent.mkdir(parents=True, exist_ok=True)
             download_with_progress(url=url, dest_path=self.base_img_path)
+        
+        return True
 
 
     # Prepare all guest data that is not cloud_config (user-data) or meta-data
@@ -64,16 +70,8 @@ class IzbaCrtProfile(BaseProfile):
 
         from thirdparty.izba.keys import generate_ssh_keys
         generate_ssh_keys(izba.inst_path / "misc" / "ssh")
-    
 
-    def prepare_instance_guest_data(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        # # Creates folder structure
-        # izba.create_std_folders()
-
-        # from thirdparty.izba.keys import generate_ssh_keys
-        # generate_ssh_keys(izba.inst_path / "context" / "keys")
+        return True
 
 
     # Build cloud config representative of the profile's use case.
@@ -85,21 +83,12 @@ class IzbaCrtProfile(BaseProfile):
 
         import time
         self.cloud_init_meta_data = {
-            'instance-id': f'{izba.type_name}-{izba.name}-{int(time.time())}',
-            'local-hostname': f'{izba.type_name}-{izba.name}',
+            'instance-id': f'{izba.profile_name}-{izba.profile_inst}-{int(time.time())}',
+            'local-hostname': f'{izba.profile_name}-{izba.profile_inst}',
         }
 
+        return True
 
-    def prepare_instance_cloud_config(self, izba, reboot : bool = True):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        # self.cloud_init_user_data = self._build_instance_cloud_config(izba)
-
-        # import time
-        # self.cloud_init_meta_data = {
-        #     'instance-id': f'agent-{izba.name}-{int(time.time())}',
-        #     'local-hostname': f'agent-{izba.name}',
-        # }
 
     # When the cloud_config (ie user-data) is delivered to the VM,
     # everything in the import folder will also be delivered.
@@ -109,15 +98,9 @@ class IzbaCrtProfile(BaseProfile):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         # import shutil
-
-        # TODO: Copy any binaries or dependencies to install here.
-        # TODO: k3s? podman packages? docker packages?
-
         # shutil.copytree(izba.gold_path / "keys", izba.gold_path / "import", dirs_exist_ok=True)
 
-
-    def build_instance_context_folder(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+        return True
 
 
     # Construct the seed image itself:
@@ -143,19 +126,7 @@ class IzbaCrtProfile(BaseProfile):
 
         make_seed(path=seed_path, tree=(izba.inst_path / "context"))
 
-
-    def build_instance_seed_image(self, izba):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        # from thirdparty.qemu.cloud_init import make_seed
-        # from thirdparty.qemu.cloud_init.cloud_config import cloud_config_to_yaml
-        # import yaml
-
-        # seed_path = izba.inst_path / "seed.iso"
-        # user_data_yaml = cloud_config_to_yaml(self.cloud_init_user_data)
-        # meta_data_yaml = yaml.dump(self.cloud_init_meta_data)
-        # # TODO: Change function so everything in "context" becomes seed.iso
-        # make_seed(path=seed_path, user_data=user_data_yaml, meta_data=meta_data_yaml, tree=(izba.inst_path / "context"))
+        return True
 
 
     # Copy/adjust the base to the golden (before running golden first-boot)
@@ -178,23 +149,20 @@ class IzbaCrtProfile(BaseProfile):
         from thirdparty.izba.subprocess import run_with_timeout
         qemu_img_timeout = 30
         rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
-        print(f"rc: {rc} timedout: {timedout}")
-        print(f"stdout:\n{out}\nstderr:\n{err}")
-        print("---")
+
+        if rc != 0:
+            print(f"rc: {rc} timedout: {timedout}")
+            print(f"stdout:\n{out}\nstderr:\n{err}")
+            print("---")
 
         from thirdparty.izba.extraction import extract_from_disk_image
         # TODO: Consider moving the KERNEL_FILES to prepare_* functions.
         extract_from_disk_image(self.base_img_path, UBUNTU_BOOT_FILES, izba.inst_path / "images")
 
+        return True
 
-    # Runs the VM and shuts down when complete.
-    # Depends on: prepare_golden(), build_seed_image()
-    def build_base_disk_image(self, izba, name='default', **opts):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        import os
-        from pathlib import Path
-
+    def _qemu_build_base_image(self, izba):
         kernel_cmdline = ' '.join([
             f"root=LABEL=cloudimg-rootfs",
             "rw",
@@ -206,31 +174,33 @@ class IzbaCrtProfile(BaseProfile):
             #"ds=nocloud,s=/opt/seed,i=special-id"
         ])
 
-        # Arguments too long if we don't change folders.
+        # TODO: Consider dynamically calculating relative paths.
+        
+        logs_fpath = izba.inst_path / "logs"
+        images_fpath = izba.inst_path / "images"
+        run_fpath = izba.inst_path / "run"
+
+        import time
+        real_log_fpath = logs_fpath / "console" / f"console-{int(time.time())}.log"
+        log_fpath = logs_fpath / f"console.log"
+        log_fpath.unlink(missing_ok=True)
+        log_fpath.symlink_to(logs_fpath / "console" / real_log_fpath.name)
+
+        base_image_fpath = images_fpath / "base-image.qcow2"
+        seed_fpath = images_fpath / "seed.iso"
+        pidfile_fpath = run_fpath / "qemu.pid"
+        qmp_fpath = run_fpath / "qemu.qmp"
+        kernel_fpath = images_fpath / "vmlinuz"
+        initrd_fpath = images_fpath / "initrd.img"
+
+        from thirdparty.izba.network import find_free_port
+        ssh_host_port = find_free_port(2222)
+        ssh_host_port_fpath = run_fpath / "ssh_host_port"
+
+        # Arguments too long if we don't change folders and use relative paths.
         from thirdparty.izba.subprocess import workdir
         with workdir(izba.inst_path):
 
-            # Note: Arguments deliberately hard coded as relative to self.path
-            # TODO: Consider dynamically calculating relative paths.
-
-            import time
-            real_log_fpath = Path("logs") / "console" / f"console-{int(time.time())}.log"
-            log_fpath = Path("logs") / f"console.log"
-            log_fpath.unlink(missing_ok=True)
-            log_fpath.symlink_to(Path("console") / real_log_fpath.name)
-
-            base_image_fpath = Path("images") / "base-image.qcow2"
-            seed_fpath = Path("images") / Path("seed.iso")
-            pidfile_fpath = Path("run") / "qemu.pid"
-            qmp_fpath = Path("run") / "qemu.qmp"
-            kernel_fpath = Path("images") / Path("vmlinuz")
-            initrd_fpath = Path("images") / Path("initrd.img")
-
-            from thirdparty.izba.network import find_free_port
-            ssh_host_port = find_free_port(2222)
-            ssh_host_port_fpath = Path("run") / "ssh_host_port"
-
-            
             import thirdparty.qemu.qapi as qapi
             qemu_cmd_obj = qapi.QemuCommand(
                 # --- common ---
@@ -240,21 +210,21 @@ class IzbaCrtProfile(BaseProfile):
                 cpu="host",
                 memory="2G",
                 smp=2,
-                kernel=kernel_fpath,
-                initrd=initrd_fpath,
+                kernel=kernel_fpath.relative_to(izba.inst_path),
+                initrd=initrd_fpath.relative_to(izba.inst_path),
                 append=kernel_cmdline,
                 nodefaults=True,
                 no_user_config=True,
                 display="none",
-                serial=[qapi.ChardevFile(path=log_fpath)],
-                qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
-                pidfile=pidfile_fpath,
+                serial=[qapi.ChardevFile(path=log_fpath.relative_to(izba.inst_path))],
+                qmp=[qapi.ChardevSocket(path=qmp_fpath.relative_to(izba.inst_path), server=True, wait=False)],
+                pidfile=pidfile_fpath.relative_to(izba.inst_path),
                 daemonize=True,
                 sandbox=True,
                 # --- use case specific ---
                 drives=[
-                    qapi.Drive(id="root", file=base_image_fpath, format="qcow2", interface="none"),
-                    qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
+                    qapi.Drive(id="root", file=base_image_fpath.relative_to(izba.inst_path), format="qcow2", interface="none"),
+                    qapi.Drive(id="seed", file=seed_fpath.relative_to(izba.inst_path), format="raw", interface="none", readonly=True),
                 ],
                 netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
                 devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
@@ -274,37 +244,77 @@ class IzbaCrtProfile(BaseProfile):
                 import traceback
                 traceback.print_exc()
                 # breakpoint()
+        
+        return True
 
-            ### Create the origin-overlay
-            import thirdparty.qemu.img as qimg
-            qemu_img_cmd = qimg.Create(
-                quiet=True,
-                format="qcow2",
-                backing_format="qcow2",
-                backing_file=(izba.inst_path / "images" / "base-image.qcow2"),
-                filename=(izba.inst_path / "images" / "origin-overlay.qcow2"))
-            
-            print(qemu_img_cmd.to_shell())
-            from thirdparty.izba.subprocess import run_with_timeout
-            qemu_img_timeout = 30
-            rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
-            print(f"rc: {rc} timedout: {timedout}")
-            print(f"stdout:\n{out}\nstderr:\n{err}")
-            print("---")
 
-            ### Do first boot of origin-overlay
+    def _create_origin_overlay(self, izba):
+        ### Create the origin-overlay
+        import thirdparty.qemu.img as qimg
+        qemu_img_cmd = qimg.Create(
+            quiet=True,
+            format="qcow2",
+            backing_format="qcow2",
+            backing_file=(izba.inst_path / "images" / "base-image.qcow2"),
+            filename=(izba.inst_path / "images" / "origin-overlay.qcow2"))
+        
+        print(qemu_img_cmd.to_shell())
+        from thirdparty.izba.subprocess import run_with_timeout
+        qemu_img_timeout = 30
+        rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
+        print(f"rc: {rc} timedout: {timedout}")
+        print(f"stdout:\n{out}\nstderr:\n{err}")
+        print("---")
 
-            import time
-            real_log_fpath = Path("logs") / "console" / f"console-{int(time.time())}.log"
-            log_fpath = Path("logs") / f"console.log"
-            log_fpath.unlink(missing_ok=True)
-            log_fpath.symlink_to(Path("console") / real_log_fpath.name)
+        return True
 
-            origin_overlay_fpath = Path("images") / "origin-overlay.qcow2"
 
-            from thirdparty.izba.network import find_free_port
-            ssh_host_port = find_free_port(2222)
-            ssh_host_port_fpath = Path("run") / "ssh_host_port"
+    def _qemu_init_origin_overlay(self, izba):
+        ### Do first boot of origin-overlay
+
+        kernel_cmdline = ' '.join([
+            f"root=LABEL=cloudimg-rootfs",
+            "rw",
+            "console=ttyS0",
+            "panic=1", # TODO: What does this do?
+            "reboot=t", # shutdown qemu on reboot
+            #"reboot=k",
+            "random.trust_cpu=on", # TODO: What does this do?
+            #"ds=nocloud,s=/opt/seed,i=special-id"
+        ])
+
+        # TODO: Consider dynamically calculating relative paths.
+        
+        logs_fpath = izba.inst_path / "logs"
+        images_fpath = izba.inst_path / "images"
+        run_fpath = izba.inst_path / "run"
+
+        import time
+        real_log_fpath = logs_fpath / "console" / f"console-{int(time.time())}.log"
+        log_fpath = logs_fpath / f"console.log"
+        log_fpath.unlink(missing_ok=True)
+        log_fpath.symlink_to(logs_fpath / "console" / real_log_fpath.name)
+
+        # ??
+        qemu_stderr_fpath = logs_fpath / "qemu-stderr.log"
+        qemu_debug_fpath = logs_fpath / "qemu-debug.log"
+
+        #base_image_fpath = images_fpath / "base-image.qcow2"
+        origin_overlay_fpath = images_fpath / "origin-overlay.qcow2"
+
+        seed_fpath = images_fpath / "seed.iso"
+        pidfile_fpath = run_fpath / "qemu.pid"
+        qmp_fpath = run_fpath / "qemu.qmp"
+        kernel_fpath = images_fpath / "vmlinuz"
+        initrd_fpath = images_fpath / "initrd.img"
+
+        from thirdparty.izba.network import find_free_port
+        ssh_host_port = find_free_port(2222)
+        ssh_host_port_fpath = run_fpath / "ssh_host_port"
+
+        # Arguments too long if we don't change folders and use relative paths.
+        from thirdparty.izba.subprocess import workdir
+        with workdir(izba.inst_path):
 
             import thirdparty.qemu.qapi as qapi
             qemu_cmd_obj = qapi.QemuCommand(
@@ -315,46 +325,110 @@ class IzbaCrtProfile(BaseProfile):
                 cpu="host",
                 memory="2G",
                 smp=2,
-                kernel=kernel_fpath,
-                initrd=initrd_fpath,
+                kernel=kernel_fpath.relative_to(izba.inst_path),
+                initrd=initrd_fpath.relative_to(izba.inst_path),
                 append=kernel_cmdline,
                 nodefaults=True,
                 no_user_config=True,
                 display="none",
-                serial=[qapi.ChardevFile(path=log_fpath)],
-                qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
-                pidfile=pidfile_fpath,
+                serial=[qapi.ChardevFile(path=log_fpath.relative_to(izba.inst_path))],
+                qmp=[qapi.ChardevSocket(path=qmp_fpath.relative_to(izba.inst_path), server=True, wait=False)],
+                pidfile=pidfile_fpath.relative_to(izba.inst_path),
                 daemonize=True,
                 sandbox=True,
                 # --- use case specific ---
+                # Absolute: -daemonize makes QEMU chdir("/"), and inactivating the overlay for
+                # a state save reopens it read-only *by filename*. With a relative path that
+                # reopen fails, write permission is kept, and the migration fails with
+                # "Error in migration completion: Bad address".
                 drives=[
-                    qapi.Drive(id="root", file=origin_overlay_fpath, format="qcow2", interface="none"),
-                    qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
+                    qapi.Drive(id="root", file=Path(origin_overlay_fpath.relative_to(izba.inst_path)).resolve(), format="qcow2", interface="none"),
+                    qapi.Drive(id="seed", file=Path(seed_fpath.relative_to(izba.inst_path)).resolve(), format="raw", interface="none", readonly=True),
                 ],
                 netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
                 devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
+                
+                # --- diagnostics for the VM state save below ---
+                # With a log file and log items, QEMU should not point the daemon's stderr
+                # (error_report) at /dev/null; the trace events record which vmstate section
+                # a failed save died in (needs the "log" trace backend, the default).
+                msg_timestamp=True,
+                log=["guest_errors"],
+                logfile=qemu_debug_fpath.relative_to(izba.inst_path),
+                trace=["savevm_*", "vmstate_save*", "migration_completion*", "migrate_set_state",
+                       "qio_channel_file*"],
             )
 
             print(f"origin-overlay qemu command: {qemu_cmd_obj.to_shell()}")
 
             try:
+                # --- Start qemu ---
                 ssh_host_port_fpath.parent.mkdir(parents=True, exist_ok=True)
                 ssh_host_port_fpath.write_text(f"{ssh_host_port}\n")
                 # from thirdparty.izba.subprocess import run_and_follow_with_pidfile
                 # run_and_follow_with_pidfile(qemu_cmd_obj.to_args(), log_fpath, pidfile_fpath)
                 import subprocess
                 #* Daemonized qemu causes this to return quickly.
-                subprocess.run(qemu_cmd_obj.to_args())
+                # The daemon inherits this stderr, so its error messages land in the file.
+                with open(qemu_stderr_fpath, "w") as qemu_stderr:
+                    subprocess.run(qemu_cmd_obj.to_args(), stdout=qemu_stderr, stderr=qemu_stderr)
 
+                # --- Wait for cloud-init to complete and sshd to be ready. ---
                 from thirdparty.izba.subprocess.ssh import pidfile_ssh_wait
-                pidfile_fpath = self.inst_path / "run" / "qemu.pid"
-                ssh_host_port = int((self.inst_path / "run" / "ssh_host_port").read_text().strip())
                 print(f"Waiting for SSH. port {ssh_host_port} pidfile {pidfile_fpath} ")
                 # Implicitly waits for 5 minutes.
-                identity_fpath = self.inst_path / "misc" / "ssh" / "id_ed25519"
+                identity_fpath = Path("misc") / "ssh" / "id_ed25519"
                 pidfile_ssh_wait(pidfile=pidfile_fpath, port=ssh_host_port, identity_fpath=identity_fpath)
 
-                #* At this point we should be able to take RAM snapshot and shutdown qemu.
+                # --- Save the state and quit the VM ---
+                # Save RAM + device state to images/origin-overlay.state by migrating to a
+                # file, then quit without resuming the guest. The vCPUs stay stopped from
+                # before the migration until exit, so origin-overlay.qcow2 is exactly the disk
+                # state that pairs with the saved RAM. Resume later with the same drives plus
+                # QemuCommand(incoming=f"file:{state_fpath}", ...).
+                from thirdparty.qemu.qapi import qmp
+                from thirdparty.izba.subprocess import read_pid, wait_for_exit
+                # Absolute: the daemonized QEMU has changed directory to "/".
+                state_fpath = (Path("images") / "origin-overlay.state").resolve()
+                # Never leave a stale state file that could be paired with the new overlay.
+                state_fpath.unlink(missing_ok=True)
+                qemu_pid = read_pid(pidfile_fpath)
+                diag_fpath = Path("logs") / f"qemu-diagnostics-{int(time.time())}.txt"
+                migrate_error = None
+                graph_before = None
+                with qmp.QmpClient(qmp_fpath) as mon:
+                    try:
+                        mon.execute(qmp.Stop())
+                        # Kept for diagnostics: migration completion inactivates every block
+                        # node, which fails if some edge still holds write permission.
+                        try:
+                            graph_before = mon.execute(qmp.XDebugQueryBlockGraph())
+                        except Exception as e:
+                            graph_before = f"<failed: {type(e).__name__}: {e}>"
+                        mon.execute(qmp.Migrate(uri=f"file:{state_fpath}"))
+                        info = mon.wait_migration()
+                        ram_bytes = info.ram.transferred if info.ram else "?"
+                        print(f"Saved VM state to {state_fpath} ({ram_bytes} bytes RAM transferred)")
+                    except Exception as e:
+                        migrate_error = e
+                        # While QEMU is still up: its view of the VM and of the failed migration.
+                        _write_qmp_diagnostics(diag_fpath, mon, qemu_pid, qemu_cmd_obj, migrate_error,
+                                               graph_before)
+                    finally:
+                        # quit flushes and closes the images; with the guest still paused this
+                        # is safe whether or not the migration succeeded.
+                        mon.execute(qmp.Quit())
+                exited = qemu_pid is None or wait_for_exit(qemu_pid, timeout=60)
+                if migrate_error is not None:
+                    # After exit, so QEMU's stderr and trace log are complete.
+                    _append_host_diagnostics(diag_fpath, qemu_cmd_obj, state_fpath,
+                                             [qemu_stderr_fpath, qemu_debug_fpath])
+                    state_fpath.unlink(missing_ok=True)
+                    print(diag_fpath.read_text())
+                    print(f"QEMU diagnostics written to {diag_fpath.resolve()}")
+                    raise migrate_error
+                if not exited:
+                    raise RuntimeError(f"QEMU (pid {qemu_pid}) did not exit after QMP quit")
 
 
             except Exception as e:
@@ -365,9 +439,19 @@ class IzbaCrtProfile(BaseProfile):
                 # breakpoint()
 
 
+    # Runs the VM and shuts down when complete.
+    # Depends on: prepare_golden(), build_seed_image()
+    def build_base_disk_image(self, izba, name='default', **opts):
+        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        self._qemu_build_base_image(izba)
+        self._create_origin_overlay(izba)
+        self._qemu_init_origin_overlay(izba)
+
+
     # Copy/adjust the golden to the instance
     # Depends on: build_golden(self)
-    def prepare_instance_disk_image(self, izba):
+    def prepare_overlay_disk_image(self, izba):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
         
         # import thirdparty.qemu.img as qimg
@@ -388,144 +472,202 @@ class IzbaCrtProfile(BaseProfile):
         # print(f"stdout:\n{out}\nstderr:\n{err}")
         # print("---")
 
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        # Absolute so the backing reference stays valid whatever directory qemu runs from.
+        origin_fpath = (izba.inst_path / "images" / "origin-overlay.qcow2").resolve()
+        if not origin_fpath.exists():
+            print(f"Origin overlay for {izba.profile_name}:{izba.profile_inst} not built. Run build first.")
+            return False
+
+        # mkdtemp creates the folder atomically with a unique name.
+        # TODO: Izba class should do the auto overlay name generation.
+        # *At this point we should know the overlay_name and the folder should exist.
+        # overlays_path = self.inst_path / "overlays"
+        # overlays_path.mkdir(parents=True, exist_ok=True)
+        # overlay_path = Path(tempfile.mkdtemp(prefix="overlay-", dir=overlays_path))
+        # overlay_path.chmod(0o755)  # mkdtemp creates it 0700
+        # for folder in ['run', 'logs', 'images', 'mnt']:
+        #     (overlay_path / folder).mkdir()
+
+        overlay_image_fpath = izba.overlay_path / "images" / "overlay.qcow2"
+        import thirdparty.qemu.img as qimg
+        qemu_img_cmd = qimg.Create(
+            quiet=True,
+            format="qcow2",
+            backing_format="qcow2",
+            backing_file=origin_fpath,
+            filename=overlay_image_fpath)
+
+        print(qemu_img_cmd.to_shell())
+        from thirdparty.izba.subprocess import run_with_timeout
+        qemu_img_timeout = 30
+        rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
+
+        if rc != 0 or timedout:
+            print(f"rc: {rc} timedout: {timedout}")
+            print(f"stdout:\n{out}\nstderr:\n{err}")
+            print("---")
+
+            print(f"Failed to create overlay image; removing {overlay_image_fpath}")
+            shutil.rmtree(overlay_image_fpath, ignore_errors=True)
+            return False
+
+        print(f"Created overlay {overlay_image_fpath}")
+        return True
+
 
     # Starts the VM and leaves running until kill or stop.
+    # Resumes the RAM/device state saved in images/origin-overlay.state (see
+    # build_base_disk_image) on top of a fresh overlay disk created by Izba.create().
     def start_instance_vm(self, izba, console='stdout', **opts):
 
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        # import os
-        # from pathlib import Path
+        import subprocess
+        import time
+        from thirdparty.izba.network import find_free_port
+        from thirdparty.izba.subprocess import workdir, read_pid, is_alive
+        from thirdparty.qemu.qapi import qmp
 
-        # '''
-        #     Golden boot:  ds=nocloud;s=/var/lib/cloud/seed/nocloud/;i=golden
-        #                 -> set everything up, place final user-data/meta-data in seed dir
-        #                 -> cloud-init clean --logs; reset machine-id/host keys; poweroff
+        # TODO: Make overlay-X dynamic
+        overlay_fpath = izba.overlays_path / izba.overlay_name
+        if not overlay_fpath.exists():
+            print(f"Overlay for overlay {izba.overlay_name} not built. Run build first.")
+            return False
 
-        #     Each clone:   qemu-img create -f qcow2 -b root.qcow2 -F qcow2 vm1.qcow2
-        #                 ds=nocloud;s=/var/lib/cloud/seed/nocloud/;i=vm1-<uniq>
-        #                 -> first boot
-            
-        #     sudo cloud-init clean --logs
-        #     cloud-init query instance-id
-        #     cat /var/lib/cloud/data/instance-id
-        #     sudo truncate -s 0 /etc/machine-id
-        #     sudo rm -f /etc/ssh/ssh_host_*
-        # '''
+        profile_images_path = izba.inst_path / "images"
+        state_fpath = profile_images_path / "origin-overlay.state"
+        if not state_fpath.exists():
+            print(f"No saved VM state at {state_fpath}. Run build first.")
+            return False
 
-        # def build_kernel_cmdline():
-        #     # provision VM with seed ISO
-        #     kernel_modules = ','.join([
-        #         "virtio_mmio",
-        #         "virtio_blk",
-        #         "virtio_net",
-        #         "ext4",
-        #         # ?? "virtiofs", # CONFIG_VIRTIO_FS (since Linux 5.4) deps: fuse, virtio_pci
-        #     ])
-        #     kernel_root = "LABEL=cloudimg-rootfs"
-        #     kernel_rootfstype = "ext4"
-        #     return ' '.join([
-        #         f"root={kernel_root}",
-        #         #f"rootfstype={kernel_rootfstype}",
-        #         "rw",
-        #         "console=ttyS0",
-        #         "panic=1",
-        #         #f"modules={kernel_modules}",
-        #         "reboot=t", #"reboot=k",
-        #         "random.trust_cpu=on",
-        #     ])
-        # kernel_cmdline = build_kernel_cmdline()
+        kernel_cmdline = ' '.join([
+            f"root=LABEL=cloudimg-rootfs",
+            "rw",
+            "console=ttyS0",
+            "panic=1", # TODO: What does this do?
+            "reboot=t", # shutdown qemu on reboot
+            #"reboot=k",
+            "random.trust_cpu=on", # TODO: What does this do?
+            #"ds=nocloud,s=/opt/seed,i=special-id"
+        ])
 
+        # TODO: Consider dynamically calculating relative paths.
+        
+        logs_fpath = izba.overlay_path / "logs"
+        images_fpath = izba.overlay_path / "images"
+        run_fpath = izba.overlay_path / "run"
 
-        # # Arguments too long if we don't change folders.
-        # from thirdparty.izba.subprocess import workdir
-        # with workdir(izba.inst_path):
-        #     # do stuff
+        import time
+        real_log_fpath = logs_fpath / "console" / f"console-{int(time.time())}.log"
+        log_fpath = logs_fpath / f"console.log"
+        log_fpath.unlink(missing_ok=True)
+        log_fpath.symlink_to(logs_fpath / "console" / real_log_fpath.name)
 
-        #     # Note: Arguments deliberately hard coded as relative to self.path
-        #     # TODO: Consider dynamically calculating relative paths.
-        #     import time
-        #     real_log_fpath = Path("logs") / f"instance-console-{int(time.time())}.log"
-        #     log_fpath = Path("logs") / f"instance-console.log"
-        #     log_fpath.unlink(missing_ok=True)
-        #     log_fpath.symlink_to(real_log_fpath.name)
+        qemu_stderr_fpath = logs_fpath / "qemu-stderr.log"
 
-        #     instance_fpath = Path("instance.qcow2")
-        #     seed_fpath = Path("seed.iso")
-        #     pidfile_fpath = Path("run") / "instance.pid"
-        #     qmp_fpath = Path("run") / "instance.qmp"
-        #     kernel_fpath = Path("vmlinuz")
-        #     initrd_fpath = Path("initrd.img")
-        #     from thirdparty.izba.network import find_free_port
-        #     ssh_host_port = find_free_port(2222)
-        #     ssh_host_port_fpath = Path("run") / "ssh_host_port"
+        overlay_image_fpath = images_fpath / "overlay.qcow2"
+        seed_fpath = profile_images_path / "seed.iso"
+        pidfile_fpath = run_fpath / "qemu.pid"
+        qmp_fpath = run_fpath / "qemu.qmp"
+        kernel_fpath = profile_images_path / "vmlinuz"
+        initrd_fpath = profile_images_path / "initrd.img"
 
-        #     # TODO: Add all the restictions associated with --network opt
-        #     def build_qemu_command():
-        #         import thirdparty.qemu.qapi as qapi
-        #         qemu_cmd_obj = qapi.QemuCommand(
-        #             # --- common ---
-        #             machine=qapi.MicroVM(acpi=False),
-        #             no_reboot=True,
-        #             enable_kvm=True,
-        #             cpu="host",
-        #             memory="2G",
-        #             smp=2,
-        #             kernel=kernel_fpath,
-        #             initrd=initrd_fpath,
-        #             append=kernel_cmdline,
-        #             nodefaults=True,
-        #             no_user_config=True,
-        #             display="none",
-        #             serial=[qapi.ChardevFile(path=log_fpath)],
-        #             qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
-        #             pidfile=pidfile_fpath,
-        #             daemonize=True,
-        #             sandbox=True,
-        #             # --- use case specific ---
-        #             drives=[
-        #                 qapi.Drive(id="root", file=instance_fpath, format="qcow2", interface="none"),
-        #                 qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
-        #             ],
-        #             netdevs=[
-        #                 qapi.NetdevUser(id="n0", hostfwd=[
-        #                     qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)
-        #                 ])
-        #             ],
-        #             devices=[
-        #                 qapi.VirtioBlk(drive="root"),
-        #                 qapi.VirtioBlk(drive="seed"),
-        #                 qapi.VirtioNet(netdev="n0"),
-        #                 qapi.VirtioRng()
-        #             ],
-        #         )
+        from thirdparty.izba.network import find_free_port
+        ssh_host_port = find_free_port(2222)
+        ssh_host_port_fpath = run_fpath / "ssh_host_port"
 
-        #         print(f"qemu command: {qemu_cmd_obj.to_shell()}")
-        #         return qemu_cmd_obj
-        #     qemu_cmd_obj = build_qemu_command()
+        pid = read_pid(pidfile_fpath)
+        if pid is not None and is_alive(pid):
+            print(f"{izba.overlay_name} is already running (pid {pid}). Run stop first.")
+            return False
+        pidfile_fpath.unlink(missing_ok=True)
 
+        # Paths outside the overlay are absolute; QEMU runs from the overlay folder.
+        with workdir(izba.overlay_path):
+
+            import thirdparty.qemu.qapi as qapi
+            qemu_cmd_obj = qapi.QemuCommand(
+                # --- common ---
+                machine=qapi.MicroVM(acpi=False),
+                no_reboot=True,
+                enable_kvm=True,
+                cpu="host",
+                memory="2G",
+                smp=2,
+                kernel=kernel_fpath,
+                initrd=initrd_fpath,
+                append=kernel_cmdline,
+                nodefaults=True,
+                no_user_config=True,
+                display="none",
+                serial=[qapi.ChardevFile(path=log_fpath)],
+                qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
+                pidfile=pidfile_fpath,
+                daemonize=True,
+                sandbox=True,
+                # --- use case specific ---
+                # Absolute: -daemonize makes QEMU chdir("/"), and inactivating the overlay for
+                # a state save reopens it read-only *by filename*. With a relative path that
+                # reopen fails, write permission is kept, and the migration fails with
+                # "Error in migration completion: Bad address".
+                drives=[
+                    qapi.Drive(id="root", file=overlay_image_fpath, format="qcow2", interface="none"),
+                    qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
+                ],
+                netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
+                devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
+                incoming=f"file:{state_fpath}",
+                msg_timestamp=True,
+            )
+            print(f"instance qemu command: {qemu_cmd_obj.to_shell()}")
+
+            #* Daemonized qemu causes this to return quickly.
+            # The daemon inherits this stderr, so its error messages land in the file.
+            with open(qemu_stderr_fpath, "w") as qemu_stderr:
+                # TODO: Find a safer way to post the ssh_host_port
+                ssh_host_port_fpath.write_text(f"{ssh_host_port}\n")
+                rc = subprocess.run(qemu_cmd_obj.to_args(), stdout=qemu_stderr, stderr=qemu_stderr).returncode
+            if rc != 0:
+                print(f"qemu exited with {rc}:\n{qemu_stderr_fpath.read_text()}")
+                return False
+
+        #     # TODO: This seems like overkill atm?
+        #     # Loading the state runs in the daemon after it detaches: status is "inmigrate"
+        #     # until the RAM is loaded, then the guest starts ("running"). On a failed load
+        #     # QEMU exits, so watch the pid as well.
+            pid = read_pid(pidfile_fpath)
+        #     status = None
+        #     deadline = time.monotonic() + 120
         #     try:
-        #         ssh_host_port_fpath.parent.mkdir(parents=True, exist_ok=True)
-        #         ssh_host_port_fpath.write_text(f"{ssh_host_port}\n")
-        #         if console == 'stdout':
-        #             from thirdparty.izba.subprocess import run_and_follow_with_pidfile
-        #             run_and_follow_with_pidfile(qemu_cmd_obj.to_args(), log_fpath, pidfile_fpath)
-        #         elif console == 'none':
-        #             # TODO: Technically this passed the console to stdout, but if we daemonize
-        #             # TODO: the qemu process, it should immediately return.
-        #             import subprocess
-        #             subprocess.run(qemu_cmd_obj.to_args())
+        #         with qmp.QmpClient(qmp_fpath) as mon:
+        #             while time.monotonic() < deadline:
+        #                 status = mon.execute(qmp.QueryStatus()).status
+        #                 if status == "running":
+        #                     break
+        #                 time.sleep(0.2)
+        #     except (OSError, ConnectionError) as e:
+        #         status = f"QMP lost ({e})"
+        #     if status != "running":
+        #         alive = pid is not None and is_alive(pid)
+        #         print(f"VM did not resume from {state_fpath} (status: {status}, qemu "
+        #               f"{'still running' if alive else 'exited'}).")
+        #         print(f"qemu stderr:\n{qemu_stderr_fpath.read_text()}")
+        #         return False
 
+            print(f"Resumed {izba.profile_name}:{izba.profile_inst}/{izba.overlay_name} (pid {pid}); "
+                  f"ssh -p {ssh_host_port} user@127.0.0.1")
 
-        #     except Exception as e:
-        #        print(f"Error: {e}")
-        #        import traceback
-        #        traceback.print_exc()
-        #        # breakpoint()
+        #     # TODO: I don't like this.
+        #     if console == 'stdout':
+        #         # Blocks until qemu exits (it removes its pidfile).
+        #         from thirdparty.izba.logging import tail_follow
+        #         tail_follow(log_fpath, pidfile_fpath)
 
-        # # finally:
-        # #     # Revert back to old working folder.
-        # #     os.chdir(prev_wd)
+        return True
 
 
     # Stops the VM.
@@ -535,13 +677,68 @@ class IzbaCrtProfile(BaseProfile):
         # print(f"profiles_path: {izba.profiles_path}")
         # raise NotImplementedError()
 
+        from pathlib import Path
+        from thirdparty.izba.subprocess import workdir, is_alive, pid_shutdown, read_pid
+        from thirdparty.izba.subprocess.qemu import is_qemu_process
+
+        pidfile_fpath = izba.overlay_path / "run" / "qemu.pid"
+
+        pid = read_pid(pidfile_fpath)
+        if pid and is_alive(pid) and is_qemu_process(pid):
+            # TODO: We can be more graceful via SSH and qmp.
+            pid_shutdown(pid)
+
+            # Blocking until qemu exits.
+            print("Blocking until stop complete.", end='')
+            import time
+            from thirdparty.izba.subprocess import read_pid, is_alive
+            from thirdparty.izba.subprocess.qemu import is_qemu_process
+            
+            pid = read_pid(pidfile_fpath)
+            while pid is not None and is_alive(pid) and is_qemu_process(pid):
+                pid = read_pid(pidfile_fpath)
+                time.sleep(2)
+                print('.', end='')
+            print("\nStop complete.")
+
+            print(f"Overlay {izba.overlay_name} shutdown.")
+        else:
+            print(f"Overlay {izba.overlay_name} is not running")
+
 
     # Executes command in VM (via SSH)
-    def exec_instance_vm(self, izba):
+    def exec_instance_vm(self, izba, user='user', command=None):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
         # print(f"base_path: {izba.base_path}")
         # print(f"profiles_path: {izba.profiles_path}")
         # raise NotImplementedError()
+
+        # ! TODO: This is weird if we ever want to use stdin
+        from pathlib import Path
+        from thirdparty.izba.subprocess import workdir, read_pid, is_alive
+        from thirdparty.izba.subprocess.qemu import is_qemu_process
+
+        pidfile_fpath = izba.overlay_path / "run" / "qemu.pid"
+        profile_ssh_identity = izba.inst_path / "misc" / "ssh" / "id_ed25519"
+
+        # Is the system running?
+        pid = read_pid(pidfile_fpath)
+        if pid and is_alive(pid) and is_qemu_process(pid):
+            ssh_host_port_fpath = izba.overlay_path / "run" / "ssh_host_port"
+            from thirdparty.izba.subprocess.ssh import simple_tty_ssh_run
+            # TODO: Add command from **opts
+            simple_tty_ssh_run(
+                destination=f'{user}@127.0.0.1',
+                port=int(ssh_host_port_fpath.read_text().strip()),
+                identity_fpath=profile_ssh_identity,
+                command=' '.join(command) if command else None,
+            )
+            return True
+        else:
+            print(f"Overlay {self.overlay_name} is not running")
+            return False
+        
+        return False
 
 
     # Starts VM, runs a single script, shuts down VM.
@@ -596,6 +793,7 @@ class IzbaCrtProfile(BaseProfile):
             #     cc.WriteFile(path="/etc/containers/registries.conf.d/00-crt.conf",
             #                 content=REGISTRIES_CONF, permissions="0644"),
             # ],
+            packages=["openssh-server"],
             runcmd=[
                 # Mount seed iso
                 "mkdir -p /mnt/seed",
@@ -677,3 +875,150 @@ class IzbaCrtProfile(BaseProfile):
     #         ],
     #         power_state=power_state,
     #     )
+
+def _diag_section(out, title, produce):
+    """Write one titled section; a failing probe records its error instead of aborting the dump."""
+    import json
+    out.write(f"\n===== {title} =====\n")
+    try:
+        value = produce()
+    except Exception as e:
+        value = f"<failed: {type(e).__name__}: {e}>"
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="json", by_alias=True)
+    if not isinstance(value, str):
+        value = json.dumps(value, indent=2, default=str)
+    out.write(value.rstrip("\n") + "\n")
+
+
+def _format_block_graph(graph):
+    """x-debug-query-block-graph as one line per edge, so the edge still holding write is easy to spot."""
+    if not isinstance(graph, dict):
+        return graph
+    nodes = {n["id"]: f'{n["type"]}:{n["name"] or "<anonymous>"}' for n in graph["nodes"]}
+    lines = [f"nodes: {', '.join(sorted(nodes.values()))}", ""]
+    for e in graph["edges"]:
+        lines.append(f'{nodes[e["parent"]]} --{e["name"]}--> {nodes[e["child"]]}\n'
+                     f'    perm={",".join(e["perm"]) or "-"}  shared={",".join(e["shared-perm"]) or "-"}')
+    return "\n".join(lines)
+
+
+def _probe_block_inactivation(mon, graph):
+    """Inactivate block-driver nodes one at a time, parents first, recording QEMU's answer for
+    each, then reactivate everything. Shows which node migration's bdrv_inactivate_all() trips on."""
+    from thirdparty.qemu.qapi import qmp
+
+    names = {n["id"]: n["name"] for n in graph["nodes"] if n["type"] == "block-driver"}
+    parents = {i: [e["parent"] for e in graph["edges"] if e["child"] == i and e["parent"] in names]
+               for i in names}
+    results, done = [], set()
+    while len(done) < len(names):
+        ready = [i for i in names if i not in done and all(p in done for p in parents[i])]
+        if not ready:
+            # Everything left sits below a node that failed to inactivate.
+            results += [f"{names[i]}: skipped (parent not inactive)" for i in names if i not in done]
+            break
+        for i in ready:
+            done.add(i)
+            try:
+                mon.execute(qmp.BlockdevSetActive(node_name=names[i], active=False))
+                results.append(f"{names[i]}: inactivated")
+            except Exception as e:
+                results.append(f"{names[i]}: FAILED {e}")
+                # Leave its children out: they would only report the active parent.
+                done.update(c for c in names if i in parents[c])
+    try:
+        mon.execute(qmp.BlockdevSetActive(active=True))
+        results.append("reactivate all: ok")
+    except Exception as e:
+        results.append(f"reactivate all: FAILED {e}")
+    return "\n".join(results)
+
+
+def _write_qmp_diagnostics(diag_fpath, mon, qemu_pid, qemu_cmd_obj, error, graph_before=None):
+    """Dump QEMU's state over QMP after a failed VM state save, while QEMU is still running."""
+    import traceback
+    from pathlib import Path
+    from thirdparty.qemu.qapi import qmp
+
+    hmp = lambda line: lambda: mon.execute(qmp.HumanMonitorCommand(command_line=line))
+    proc = Path("/proc") / str(qemu_pid)
+    with open(diag_fpath, "w") as out:
+        _diag_section(out, "error", lambda: "".join(traceback.format_exception(error)))
+        _diag_section(out, "qemu command", qemu_cmd_obj.to_shell)
+        _diag_section(out, "query-version", lambda: mon.execute(qmp.QueryVersion()))
+        _diag_section(out, "query-kvm", lambda: mon.execute(qmp.QueryKvm()))
+        _diag_section(out, "query-current-machine", lambda: mon.execute(qmp.QueryCurrentMachine()))
+        _diag_section(out, "query-status", lambda: mon.execute(qmp.QueryStatus()))
+        _diag_section(out, "query-migrate", lambda: mon.execute(qmp.QueryMigrate()))
+        _diag_section(out, "query-migrate-capabilities", lambda: mon.execute(qmp.QueryMigrateCapabilities()))
+        _diag_section(out, "query-migrate-parameters", lambda: mon.execute(qmp.QueryMigrateParameters()))
+        _diag_section(out, "query-block", lambda: [b.model_dump(mode="json", by_alias=True)
+                                                   for b in mon.execute(qmp.QueryBlock())])
+        _diag_section(out, "block graph before migrate", lambda: _format_block_graph(graph_before))
+        try:
+            graph_after = mon.execute(qmp.XDebugQueryBlockGraph())
+        except Exception as e:
+            graph_after = f"<failed: {type(e).__name__}: {e}>"
+        _diag_section(out, "block graph after failure", lambda: _format_block_graph(graph_after))
+        _diag_section(out, "query-named-block-nodes (flat)",
+                      lambda: [{k: n.get(k) for k in ("node-name", "drv", "file", "ro", "active")}
+                               for n in mon.execute(qmp.QueryNamedBlockNodes(flat=True))])
+        _diag_section(out, "per-node inactivation probe", lambda: _probe_block_inactivation(mon, graph_after))
+        _diag_section(out, "block graph after probe",
+                      lambda: _format_block_graph(mon.execute(qmp.XDebugQueryBlockGraph())))
+        _diag_section(out, "QMP events received", lambda: mon.events)
+        # "Bad address" (EFAULT) is either a write from a bad buffer (RAM blocks/memory map)
+        # or a failing KVM ioctl while saving a device (qtree lists what gets saved).
+        for line in ("info migrate", "info ramblock", "info mtree -f", "info qtree", "info cpus",
+                     "info irq", "info pic"):
+            _diag_section(out, f"HMP {line}", hmp(line))
+        _diag_section(out, f"/proc/{qemu_pid}/status (Seccomp, memory locking)",
+                      lambda: (proc / "status").read_text())
+        _diag_section(out, f"/proc/{qemu_pid}/limits", lambda: (proc / "limits").read_text())
+        _diag_section(out, f"/proc/{qemu_pid}/fd", lambda: "\n".join(
+            f"{fd.name} -> {fd.readlink()}" for fd in sorted((proc / "fd").iterdir(), key=lambda p: int(p.name))))
+
+
+def _append_host_diagnostics(diag_fpath, qemu_cmd_obj, state_fpath, log_fpaths, tail_lines=300):
+    """Append host-side facts and QEMU's own logs, after QEMU has exited."""
+    import platform
+    import resource
+    import shutil
+    import subprocess
+
+    def run(*args):
+        r = subprocess.run(args, capture_output=True, text=True, timeout=30)
+        return f"$ {' '.join(args)}  (rc={r.returncode})\n{r.stdout}{r.stderr}"
+
+    def tail(fpath):
+        lines = fpath.read_text(errors="replace").splitlines()
+        return f"({len(lines)} lines, showing last {tail_lines})\n" + "\n".join(lines[-tail_lines:])
+
+    def kernel_log():
+        # KVM, seccomp and audit messages explain many EFAULT/EPERM failures.
+        try:
+            text = run("dmesg", "--ctime")
+        except Exception:
+            text = run("journalctl", "-k", "-n", "300", "--no-pager")
+        keep = [l for l in text.splitlines() if any(k in l.lower() for k in
+                ("kvm", "qemu", "seccomp", "audit", "segfault", "oom", "$ "))]
+        return "\n".join(keep[-tail_lines:])
+
+    with open(diag_fpath, "a") as out:
+        _diag_section(out, "qemu binary version", lambda: run(qemu_cmd_obj.binary, "--version"))
+        _diag_section(out, "host", lambda: {
+            "uname": platform.uname()._asdict(),
+            "RLIMIT_FSIZE": resource.getrlimit(resource.RLIMIT_FSIZE),
+            "RLIMIT_MEMLOCK": resource.getrlimit(resource.RLIMIT_MEMLOCK),
+        })
+        _diag_section(out, "state file", lambda: {
+            "path": str(state_fpath),
+            "exists": state_fpath.exists(),
+            "size": state_fpath.stat().st_size if state_fpath.exists() else None,
+            "fs_free_bytes": shutil.disk_usage(state_fpath.parent).free,
+            "fs": run("stat", "-f", "-c", "%T", str(state_fpath.parent)).strip(),
+        })
+        for fpath in log_fpaths:
+            _diag_section(out, f"{fpath} (tail)", lambda fpath=fpath: tail(fpath))
+        _diag_section(out, "kernel log (kvm/qemu/seccomp/audit lines)", kernel_log)

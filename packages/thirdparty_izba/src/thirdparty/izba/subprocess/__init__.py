@@ -101,6 +101,16 @@ def is_alive(pid: int) -> bool:
     return True
 
 
+def wait_for_exit(pid: int, timeout: float, poll: float = 0.2) -> bool:
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not is_alive(pid):
+            return True
+        time.sleep(poll)
+    return not is_alive(pid)
+
+
 def read_pid(pidfile: Path) -> int | None:
     try:
         return int(pidfile.read_text().strip())

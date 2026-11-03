@@ -21,6 +21,8 @@ Example::
 
 Every option model accepts extra keyword arguments, which render verbatim as ``key=value``,
 for properties not modelled here. ``QemuCommand.extra_args`` appends raw arguments.
+
+QMP command models and a client for driving a running QEMU live in :mod:`.qmp`.
 """
 
 from .base import QemuOpts, escape, format_value
@@ -40,6 +42,7 @@ from .net import (
     NetdevDgram, NetdevSocket, NetdevStream, NetdevTap, NetdevUser, NetdevVhostUser, SocketAddress,
     UnixSocketAddress,
 )
+from . import qmp
 from .objects import (
     AnyObject, MemoryBackendFile, MemoryBackendMemfd, MemoryBackendRam, Object, RngRandom, Secret,
 )

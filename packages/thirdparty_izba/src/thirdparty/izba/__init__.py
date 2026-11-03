@@ -6,89 +6,122 @@ def version():
     return [0, 0, 0, 0]
 
 
-
+def parse_profile_string(profile_value, def_profile_inst='default'):
+        profile_parts = profile_value.strip().split('/', 1)
+        profile_inst = def_profile_inst
+        if len(profile_parts) > 1:
+            profile_inst = profile_parts[1]
+        return profile_parts[0], profile_inst
 
 
 class Izba():
-    def __init__(self, config, profile=None, name='default'):
-        from thirdparty.izba.config import resolve_base_path, resolve_profiles_path
+    def __init__(self, config, profile=None, profile_inst=None, overlay_name=None):
+        
+        from thirdparty.izba.config import resolve_base_path, resolve_profiles_path, resolve_overlays_path
         from thirdparty.izba.profile import BaseProfile
 
         self.config = config
         self.base_path = resolve_base_path(config)
         self.profiles_path = resolve_profiles_path(config)
+        self.overlays_path = resolve_overlays_path(config)
 
-        self.profile = profile
-        self.name = name
-        self.type_name = None
+        self.profile = None
+        self.profile_name = None
+        self.overlay_name = None
         self.inst_path = None
-        if isinstance(self.profile, BaseProfile):
-            self.type_name = profile.get_type_name()
-            self.inst_path = self.profiles_path / self.type_name / self.name
+        self.overlay_path = None
+        self.profile_inst = 'default' if profile_inst is None else profile_inst
 
-        elif self.profile is not None:
-            from thirdparty.izba.cli.registrar import get_izba_profile_eps
-            profile_index = get_izba_profile_eps()
-            profile_cls = profile_index._index[profile]['class']
-            profile_opts = profile_index._index[profile]['opts']
-            self.profile = profile_cls(**profile_opts)
-            self.type_name = profile_cls.type_name()
-            self.inst_path = self.profiles_path / self.type_name / self.name
-        
-        if self.inst_path is not None:
+        if profile is None and overlay_name is None:
+            # We're not a profile based call!
+            pass
+
+        from thirdparty.izba.cli.registrar import get_izba_profile_eps
+        profile_index = get_izba_profile_eps()
+
+        if overlay_name is not None:
+            if profile is None:
+                # overlay to profile
+                self.overlay_name = overlay_name
+                self.profile, self.profile_name, self.profile_inst = \
+                    self._overlay_to_profile(profile_index, self.overlay_name)
+
+                if self.profile is None:
+                    raise Exception(f"Failed to initialize overlay profile.")
+
+            if profile is not None:
+                self.overlay_name = overlay_name
+                if isinstance(profile, str):
+                    profile_cls = profile_index._index[profile]['class']
+                    profile_opts = profile_index._index[profile]['opts']
+                    self.profile = profile_cls(**profile_opts)
+                    self.profile_name = profile
+                    
+                else:
+                    self.profile = profile
+                    self.profile_name = type(profile).type_name
+
+        elif overlay_name is None:
+            # Assuming profile is not None
+            # TODO: Make overlay_name dynamic (with mktemp)
+            self.overlay_name = 'default'
+            if isinstance(profile, str):
+                self.profile_name, self.profile_inst = parse_profile_string(profile, def_profile_inst=self.profile_inst)
+                profile_cls = profile_index._index[self.profile_name]['class']
+                profile_opts = profile_index._index[self.profile_name]['opts']
+                self.profile = profile_cls(**profile_opts)
+
+            else:
+                self.profile = profile
+                self.profile_name = type(profile).type_name
+    
+
+        self.inst_path = self.profiles_path / self.profile_name / self.profile_inst
+        self.overlay_path = self.overlays_path / self.overlay_name
+
+        # Create standard folders for base image path
+        # TODO: Verify profiles/profile_name/profile_inst doesn't already exist.
+        if self.profile is not None:
             for folder in ['context', 'misc', 'artifacts', 'images', 'logs', 'run', 'mnt', 'overlays']:
                 (self.inst_path / folder).mkdir(parents=True, exist_ok=True)
             (self.inst_path / "logs" / "console").mkdir(parents=True, exist_ok=True)
 
-    def create_std_folders(self, fpath):
-        '''
-            PROFILE_TYPE/PROFILE_NAME
-            - context/ - files provided to guest (as seed.iso)
-              - public ssh keys
-              - public certs
-            - misc/ - file not provided to guest
-              - public and private ssh keys
-              - public certs and private keys
-            - artifacts/ - posterity created by izba (not for operation)
-              - qemu-cmd.sh
-              - user-data.yaml
-            - images/
-              - base-image.qcow2
-              - origin-overlay.qcow2 - Origin overlay with base-image backing.
-              - origin-overlay.state - RAM and state snapshot
-            - logs/
-              - console.log (symlink)
-              - console/
-                - console-$(date).log
-            - run/
-              - qemu.pid
-              - qemu.qmp
-            - mnt/
+        # Create standard folders for overlay image path
+        # TODO: Verify overlays/overlay_name doesn't already exist.
+        if overlay_name is not None:
+            for folder in ['images', 'logs', 'run', 'mnt']:
+                (self.overlay_path / folder).mkdir(parents=True, exist_ok=True)
+            (self.overlay_path / "logs" / "console").mkdir(parents=True, exist_ok=True)
+            #* If we're creating the overlay here, might as well create the profile reference too. *#
+            (self.overlay_path / "profile").write_text(f"{self.profile_name}/{self.profile_inst}")
 
-            - overlays/
-              - overlay-X/
-                - (unused?) context/ - files provided to guest (as seed.iso)
-                - (unused?) misc/ - file not provided to guest
-                - (unused?) artifacts/ - posterity created by izba (not for operation)
-                - images/
-                  - overlay-X.qcow2
-                - logs/
-                  - console.log (symlink)
-                  - console/
-                    - console-$(date).log
-                - run/
-                  - qemu.pid
-                  - qemu.qmp
-                - mnt/
-        '''
 
-        for folder in ['context', 'misc', 'artifacts', 'images', 'logs', 'run', 'mnt']:
-            (fpath / folder).mkdir(parents=True, exist_ok=True)
+    def _overlay_to_profile(self, profile_index, overlay_name):
+
+        overlay_profile_fpath = self.overlays_path / overlay_name / "profile"
+        if not overlay_profile_fpath.exists():
+            print(f"Overlay {overlay_name} does not exist. Run create or run first.")
+            return None, None, None
+
+        profile_name, profile_inst = parse_profile_string(overlay_profile_fpath.read_text())
+        if profile_name not in profile_index._index:
+            print(f"Profile type {profile_name} not registered as 'thirdparty_izba_profiles' entrypoint.")
+            return None, None, None
+
+        profile_cls = profile_index._index[profile_name]['class']
+        profile_opts = profile_index._index[profile_name]['opts']
+
+        return profile_cls(**profile_opts), profile_name, profile_inst
 
 
     # List running VMs, [-a] list all instance VMs
     def ps(self, all=False, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        # TODO: Cheap stop gap during refactor
+        for entry in self.overlays_path.iterdir():
+            if entry.is_dir():
+                print(entry.name)
 
         # from thirdparty.izba.subprocess.qemu import scan_qemu_pidfiles
         # summary = scan_qemu_pidfiles(self.profiles_inst_path, "instance.pid")
@@ -107,6 +140,11 @@ class Izba():
     # List profiles and names with golden images.
     def images(self, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        # TODO: Cheap stop gap during refactor
+        for entry in self.profiles_path.iterdir():
+            if entry.is_dir():
+                print(entry.name)
 
         # from thirdparty.izba.subprocess.qemu import scan_qemu_pidfiles
         # summary = scan_qemu_pidfiles(self.profiles_gold_path, "golden.pid")
@@ -141,12 +179,13 @@ class Izba():
         # Only do these if golden does not exist.
         if (self.inst_path / "images" / "base-image.qcow2").exists():
             print(f"Base image already exists for {self.type_name}:{self.name}. Run rmi first.")
-            return
+            return False
 
         # Download the OS, kernel, and initrd
         self.profile.cache_base(self)
         # Build data that could be used by cloud_config
         self.profile.prepare_base_guest_data(self)
+
         # Build baseline cloud_config/user-data configuration
         self.profile.prepare_base_cloud_config(self)
         # Build the data going into seed.iso
@@ -157,59 +196,78 @@ class Izba():
         self.profile.prepare_base_disk_image(self)
         # Run qemu to initialize the golden image.
         self.profile.build_base_disk_image(self)
+    
+        return True
 
 
     # Copy/adjust golden image into instance image (with qemu-img).
     # If golden image missing, call build().
     def create(self, **opts) -> bool:
+        # '''
+        #     create is for building instance images, designed to be non-interactive and
+        #     the initialization for instance VMs. A create should print an error
+        #     if the associated golden can not be found.
+        # '''
         '''
-            create is for building instance images, designed to be non-interactive and
-            the initialization for instance VMs. A create should print an error
-            if the associated golden can not be found.
+            create will create a new overlay disk image backed by origin-overlay
+
+            overlays/overlay-XXXXXXXX/
+            - run/
+            - logs/
+            - images/
+              - overlay.qcow2 - backed by images/origin-overlay.qcow2
+            - mnt/
         '''
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        # TODO: Allow create force to ignore existing instance.
-
-        # Only do these if golden does not exist.
-        if (self.inst_path / "instance.qcow2").exists():
-            print(f"Instance image already exists for {self.type_name}:{self.name}. Run rm first.")
+        if (self.overlay_path / "images" / "overlay.qcow2").exists():
+            print(f"Overlay already exists. Run rm first.")
             return False
 
-        if not (self.gold_path / "golden.qcow2").exists():
-            # TODO: Also don't allow creates if the golden VM is running.
-            print(f"Golden image for {self.type_name}:{self.name} not built. Run build first.")
-            return False
-
-        # Build data that could be used by cloud_config
-        self.profile.prepare_instance_guest_data(self)
-        # Build instance specific cloud_config/user-data configuration
-        self.profile.prepare_instance_cloud_config(self)
-        # Build the data going into seed.iso
-        self.profile.build_instance_context_folder(self)
-        # Build the seed.iso file
-        self.profile.build_instance_seed_image(self)
-        # Download the OS, kernel, and initrd
-        self.profile.cache_base(self)
-        # Copy the golden image to instance.qcow2
-        self.profile.prepare_instance_disk_image(self)
-        # Run qemu to initialize the instance image. (firstboot reboot expected)
-        self.profile.start_instance_vm(self, **opts)
-
-        # Blocking until qemu exits.
-        print("Blocking until create complete.")
-        import time
-        from thirdparty.izba.subprocess import read_pid, is_alive
-        from thirdparty.izba.subprocess.qemu import is_qemu_process
-        pidfile = self.inst_path / "run" / "instance.pid"
-        pid = read_pid(pidfile)
-        while pid is not None and is_alive(pid) and is_qemu_process(pid):
-            pid = read_pid(pidfile)
-            time.sleep(2)
-            print('.', end='')
-        print("Create complete.")
-    
+        self.profile.prepare_overlay_disk_image(self)
         return True
+
+        # # TODO: Allow create force to ignore existing instance.
+
+        # # Only do these if golden does not exist.
+        # if (self.inst_path / "instance.qcow2").exists():
+        #     print(f"Instance image already exists for {self.type_name}:{self.name}. Run rm first.")
+        #     return False
+
+        # if not (self.gold_path / "golden.qcow2").exists():
+        #     # TODO: Also don't allow creates if the golden VM is running.
+        #     print(f"Golden image for {self.type_name}:{self.name} not built. Run build first.")
+        #     return False
+
+        # # Build data that could be used by cloud_config
+        # self.profile.prepare_instance_guest_data(self)
+        # # Build instance specific cloud_config/user-data configuration
+        # self.profile.prepare_instance_cloud_config(self)
+        # # Build the data going into seed.iso
+        # self.profile.build_instance_context_folder(self)
+        # # Build the seed.iso file
+        # self.profile.build_instance_seed_image(self)
+        # # Download the OS, kernel, and initrd
+        # self.profile.cache_base(self)
+        # # Copy the golden image to instance.qcow2
+        # self.profile.prepare_instance_disk_image(self)
+        # # Run qemu to initialize the instance image. (firstboot reboot expected)
+        # self.profile.start_instance_vm(self, **opts)
+
+        # # Blocking until qemu exits.
+        # print("Blocking until create complete.")
+        # import time
+        # from thirdparty.izba.subprocess import read_pid, is_alive
+        # from thirdparty.izba.subprocess.qemu import is_qemu_process
+        # pidfile = self.inst_path / "run" / "instance.pid"
+        # pid = read_pid(pidfile)
+        # while pid is not None and is_alive(pid) and is_qemu_process(pid):
+        #     pid = read_pid(pidfile)
+        #     time.sleep(2)
+        #     print('.', end='')
+        # print("Create complete.")
+    
+        # return True
 
 
     # Remove golden image.
@@ -258,101 +316,59 @@ class Izba():
     def rm(self, force=False, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        # import shutil
+        import shutil
 
-        # # Avoid relative escapes.
-        # root = self.inst_path.resolve()
+        # Avoid relative escapes.
+        root = self.overlay_path.resolve()
 
-        # # Must be a folder
-        # if not root.is_dir():
-        #     print(f"Not a folder: {root}")
-        #     return False
+        # Must be a folder
+        if not root.is_dir():
+            print(f"Not a folder: {root}")
+            return False
 
-        # # Is it running?
-        # from thirdparty.izba.subprocess import read_pid
-        # from thirdparty.izba.subprocess.qemu import is_qemu_process
-        # pid = read_pid(root / "run" / "instance.pid")
-        # if pid is not None and is_qemu_process(pid):
-        #     print(f"Refusing: {root.parent.name}/{root.name} is running (pid {pid}). Stop it first.")
-        #     return False
+        # Is it running?
+        from thirdparty.izba.subprocess import read_pid
+        from thirdparty.izba.subprocess.qemu import is_qemu_process
+        pid = read_pid(root / "run" / "instance.pid")
+        if pid is not None and is_qemu_process(pid):
+            print(f"Refusing: {root.parent.name}/{root.name} is running (pid {pid}). Stop it first.")
+            return False
 
-        # if not force:
-        #     # Show what will be lost.
-        #     n_files = sum(1 for p in root.rglob("*") if p.is_file())
-        #     size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
-        #     print(f"About to permanently delete:\n  {root}\n  {n_files} files, {size / 1e6:.1f} MB")
+        if not force:
+            # Show what will be lost.
+            n_files = sum(1 for p in root.rglob("*") if p.is_file())
+            size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
+            print(f"About to permanently delete:\n  {root}\n  {n_files} files, {size / 1e6:.1f} MB")
 
-        #     # Make the user type the name, not just 'y', to avoid reflex-confirming.
-        #     answer = input(f"Type the instance name ({root.parent.name}/{root.name}) to confirm: ").strip()
-        #     if answer != f"{root.parent.name}/{root.name}":
-        #         print("Aborted.")
-        #         return False
+            # Make the user type the name, not just 'y', to avoid reflex-confirming.
+            profile_inst_overlay = f"{self.profile_name}/{self.profile_inst}/{self.overlay_name}"
+            answer = input(f"Type the profile and overlay name ({profile_inst_overlay}) to confirm: ").strip()
+            if answer != profile_inst_overlay:
+                print("Aborted.")
+                return False
 
-        # shutil.rmtree(root)
-        # print("Deleted.")
-        # return True
+        shutil.rmtree(root)
+        print("Deleted.")
+        return True
 
 
     # If instance image missing, call create()
     def start(self, **opts) -> bool:
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        # TODO: Allow start force to ignore existing pidfile.
-
-        # Only do these if golden does not exist.
-        if (self.inst_path / "run" / "instance.pid").exists():
-            print(f"Instance image already started for {self.type_name}:{self.name}. Run stop first.")
-            return False
-        
-        if not (self.inst_path / "instance.qcow2").exists():
-            # TODO: Also don't allow creates if the golden VM is running.
-            print(f"Instance image for {self.type_name}:{self.name} not created. Run create first.")
+        # The profile picks the overlay (from create) and checks it isn't already running.
+        if not (self.inst_path / "images" / "origin-overlay.state").exists():
+            print(f"No saved VM state for {self.type_name}:{self.name}. Run build first.")
             return False
 
-        self.profile.start_instance_vm(self, **opts)
-
-        return True
+        return self.profile.start_instance_vm(self, **opts)
 
 
     # Kill with pidfile
-    def stop(self, golden=False, **opts):
+    def stop(self, **opts):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        from pathlib import Path
-        from thirdparty.izba.subprocess import workdir, is_alive, pid_shutdown, read_pid
-        from thirdparty.izba.subprocess.qemu import is_qemu_process
-
-        inst_path = self.inst_path
-        pidfile_fname = "instance.pid"
-        if golden:
-            inst_path = self.gold_path
-            pidfile_fname = "golden.pid"
-
-        with workdir(inst_path):
-            pidfile_fpath = Path("run") / pidfile_fname
-
-            # Is the system running qemu-system-*?
-            pid = read_pid(pidfile_fpath)
-            if pid and is_alive(pid) and is_qemu_process(pid):
-                # TODO: We can be more graceful via SSH and qmp.
-                pid_shutdown(pid)
-
-                # Blocking until qemu exits.
-                print("Blocking until stop complete.")
-                import time
-                from thirdparty.izba.subprocess import read_pid, is_alive
-                from thirdparty.izba.subprocess.qemu import is_qemu_process
-                pidfile = self.inst_path / "run" / "instance.pid"
-                pid = read_pid(pidfile)
-                while pid is not None and is_alive(pid) and is_qemu_process(pid):
-                    pid = read_pid(pidfile)
-                    time.sleep(2)
-                    print('.', end='')
-                print("Stop complete.")
-
-                print(f"{self.type_name}/{self.name} shutdown.")
-            else:
-                print(f"{self.type_name}/{self.name} is not running")
+        self.profile.stop_instance_vm(self)
 
 
     def logs(self, user='user', golden=False, **opts):
@@ -363,43 +379,10 @@ class Izba():
 
 
     # Run ssh command in VM
-    def exec(self, user='user', golden=False, command=None, **opts) -> bool:
+    def exec(self, user='user', command=None, **opts) -> bool:
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        # ! TODO: This is weird if we ever want to use stdin
-        from pathlib import Path
-        from thirdparty.izba.subprocess import workdir, read_pid, is_alive
-        from thirdparty.izba.subprocess.qemu import is_qemu_process
-
-        inst_path = self.inst_path
-        pidfile_fname = "instance.pid"
-        if golden:
-            inst_path = self.gold_path
-            pidfile_fname = "golden.pid"
-
-        print(f"SSHing via {inst_path}")
-
-        with workdir(inst_path):
-            pidfile_fpath = Path("run") / pidfile_fname
-
-            # Is the system running?
-            pid = read_pid(pidfile_fpath)
-            if pid and is_alive(pid) and is_qemu_process(pid):
-                ssh_host_port_fpath = Path(".") / "run" / "ssh_host_port"
-                from thirdparty.izba.subprocess.ssh import simple_tty_ssh_run
-                # TODO: Add command from **opts
-                simple_tty_ssh_run(
-                    destination='user@127.0.0.1',
-                    port=int(ssh_host_port_fpath.read_text().strip()),
-                    identity_fpath=Path("context") / "keys" / "id_ed25519",
-                    command=' '.join(command) if command else None,
-                )
-                return True
-            else:
-                print(f"{self.type_name}/{self.name} is not running")
-                return False
-        
-        return False
+        self.profile.exec_instance_vm(self, user=user, command=command)
 
 
     # If instance image missing, call create()

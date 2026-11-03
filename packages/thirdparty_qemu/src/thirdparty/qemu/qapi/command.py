@@ -72,6 +72,20 @@ class QemuCommand(BaseModel):
     daemonize: bool = False
     sandbox: Sandbox | None = None
     snapshot: bool = False
+    # Restore an internal snapshot (e.g. one written by QMP ``snapshot-save``) at startup.
+    loadvm: str | None = None
+    # Resume migrated VM state, e.g. "file:/abs/path" written by QMP ``migrate``, or "defer".
+    incoming: str | None = None
+
+    # Debugging
+    # Prefix error messages with a timestamp (-msg timestamp=on).
+    msg_timestamp: bool = False
+    # -d log items (e.g. ["guest_errors"]) written to ``logfile`` (-D). With a log file and
+    # items enabled, a daemonized QEMU also keeps its stderr instead of redirecting to /dev/null.
+    log: list[str] = Field(default_factory=list)
+    logfile: Path | None = None
+    # -trace patterns (e.g. "savevm_*"); with the "log" trace backend they go to ``logfile``.
+    trace: list[str] = Field(default_factory=list)
 
     extra_args: list[str] = Field(default_factory=list)
 
@@ -132,6 +146,14 @@ class QemuCommand(BaseModel):
         add("-daemonize", self.daemonize)
         add("-sandbox", self.sandbox)
         add("-snapshot", self.snapshot)
+        add("-loadvm", self.loadvm)
+        add("-incoming", self.incoming)
+
+        add("-msg", "timestamp=on" if self.msg_timestamp else None)
+        add("-d", ",".join(self.log) or None)
+        add("-D", self.logfile)
+        for pattern in self.trace:
+            add("-trace", pattern)
 
         return opts
 

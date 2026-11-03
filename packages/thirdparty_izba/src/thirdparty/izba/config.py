@@ -27,6 +27,7 @@ def baseline_empty_config():
         # Consider having a "dotenv" for credentials.
         "base_path": None,
         "profiles_path": None,
+        "overlays_path": None,
 
         # Apkd has downloads in config. Download overrides in config not advised
         # as a default because we want package updates to include updates to downloads.
@@ -68,7 +69,8 @@ def load_izba_config(config:dict={}, config_path=None):
     # --- Apply environment overrides ---
 
     config["base_path"] = os.environ.get("IZBA_BASE_PATH", config["base_path"])
-    config["base_path"] = os.environ.get("IZBA_PROFILES_PATH", config["profiles_path"])
+    config["profiles_path"] = os.environ.get("IZBA_PROFILES_PATH", config["profiles_path"])
+    config["overlays_path"] = os.environ.get("IZBA_OVERLAYS_PATH", config["overlays_path"])
 
     return config
 
@@ -103,7 +105,11 @@ def implicit_base_path():
 
 
 def implicit_profiles_path(base_path=(Path('.') / "izba")):
-    return (base_path / "profiles").resolve()
+    return (Path(base_path) / "profiles").resolve()
+
+
+def implicit_overlays_path(base_path=(Path('.') / "izba")):
+    return (Path(base_path) / "overlays").resolve()
 
 
 def resolve_base_path(config=None):
@@ -111,7 +117,7 @@ def resolve_base_path(config=None):
     if config and "base_path" in config and config["base_path"] is not None:
         return Path(config["base_path"]).resolve()
 
-    return implicit_base_path()
+    return Path(implicit_base_path())
 
 
 def resolve_profiles_path(config=None):
@@ -119,7 +125,15 @@ def resolve_profiles_path(config=None):
     if config and "profiles_path" in config and config["profiles_path"] is not None:
         return Path(config["profiles_path"]).resolve()
 
-    return implicit_profiles_path(base_path=resolve_base_path(config))
+    return Path(implicit_profiles_path(base_path=resolve_base_path(config)))
+
+
+def resolve_overlays_path(config=None):
+    # Assumes config already loaded.
+    if config and "overlays_path" in config and config["overlays_path"] is not None:
+        return Path(config["overlays_path"]).resolve()
+
+    return Path(implicit_overlays_path(base_path=resolve_base_path(config)))
 
 
 
