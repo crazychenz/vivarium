@@ -60,7 +60,7 @@ def pidfile_ssh_wait(
     deadline = time.monotonic() + timeout
     while pid is not None and time.monotonic() < deadline:
         pid = read_pid(pidfile)
-        if is_alive(pid) and is_qemu_process(pid):    
+        if pid and is_alive(pid) and is_qemu_process(pid):    
             try:
                 print(f"Running: {' '.join(cmd)}")
                 result = subprocess.run(

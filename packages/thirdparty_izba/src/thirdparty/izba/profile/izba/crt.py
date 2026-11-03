@@ -171,7 +171,8 @@ class IzbaCrtProfile(BaseProfile):
             "reboot=t", # shutdown qemu on reboot
             #"reboot=k",
             "random.trust_cpu=on", # TODO: What does this do?
-            #"ds=nocloud,s=/opt/seed,i=special-id"
+            #"ds=nocloud,s=/opt/seed,i=special-id",
+            "systemd.setenv=COLUMNS=10000",
         ])
 
         # TODO: Consider dynamically calculating relative paths.
@@ -232,6 +233,9 @@ class IzbaCrtProfile(BaseProfile):
 
             print(f"base-image qemu command: {qemu_cmd_obj.to_shell()}")
 
+            qemu_build_base_image_command_fpath = izba.inst_path / "artifacts" / "qemu_build_base_image.sh"
+            qemu_build_base_image_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd_obj.to_shell()}")
+
             try:
                 ssh_host_port_fpath.parent.mkdir(parents=True, exist_ok=True)
                 ssh_host_port_fpath.write_text(f"{ssh_host_port}\n")
@@ -259,6 +263,9 @@ class IzbaCrtProfile(BaseProfile):
             filename=(izba.inst_path / "images" / "origin-overlay.qcow2"))
         
         print(qemu_img_cmd.to_shell())
+        create_origin_overlay_command_fpath = izba.inst_path / "artifacts" / "create_origin_overlay.sh"
+        create_origin_overlay_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_img_cmd.to_shell()}")
+
         from thirdparty.izba.subprocess import run_with_timeout
         qemu_img_timeout = 30
         rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
@@ -280,7 +287,8 @@ class IzbaCrtProfile(BaseProfile):
             "reboot=t", # shutdown qemu on reboot
             #"reboot=k",
             "random.trust_cpu=on", # TODO: What does this do?
-            #"ds=nocloud,s=/opt/seed,i=special-id"
+            #"ds=nocloud,s=/opt/seed,i=special-id",
+            "systemd.setenv=COLUMNS=10000",
         ])
 
         # TODO: Consider dynamically calculating relative paths.
@@ -360,6 +368,8 @@ class IzbaCrtProfile(BaseProfile):
             )
 
             print(f"origin-overlay qemu command: {qemu_cmd_obj.to_shell()}")
+            qemu_init_origin_overlay_command_fpath = izba.inst_path / "artifacts" / "qemu_init_origin_overlay.sh"
+            qemu_init_origin_overlay_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd_obj.to_shell()}")
 
             try:
                 # --- Start qemu ---
@@ -502,6 +512,10 @@ class IzbaCrtProfile(BaseProfile):
             filename=overlay_image_fpath)
 
         print(qemu_img_cmd.to_shell())
+        # TODO: Consider artifacts folder in overlay folder?
+        prepare_overlay_disk_image_command_fpath = izba.overlay_path / "logs" / "prepare_overlay_disk_image.sh"
+        prepare_overlay_disk_image_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_img_cmd.to_shell()}")
+
         from thirdparty.izba.subprocess import run_with_timeout
         qemu_img_timeout = 30
         rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
@@ -552,7 +566,8 @@ class IzbaCrtProfile(BaseProfile):
             "reboot=t", # shutdown qemu on reboot
             #"reboot=k",
             "random.trust_cpu=on", # TODO: What does this do?
-            #"ds=nocloud,s=/opt/seed,i=special-id"
+            #"ds=nocloud,s=/opt/seed,i=special-id",
+            "systemd.setenv=COLUMNS=10000",
         ])
 
         # TODO: Consider dynamically calculating relative paths.
@@ -624,6 +639,9 @@ class IzbaCrtProfile(BaseProfile):
                 msg_timestamp=True,
             )
             print(f"instance qemu command: {qemu_cmd_obj.to_shell()}")
+            # TODO: Consider artifacts folder in overlay folder?
+            start_instance_vm_command_fpath = izba.overlay_path / "logs" / "start_instance_vm.sh"
+            start_instance_vm_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd_obj.to_shell()}")
 
             #* Daemonized qemu causes this to return quickly.
             # The daemon inherits this stderr, so its error messages land in the file.
@@ -635,28 +653,38 @@ class IzbaCrtProfile(BaseProfile):
                 print(f"qemu exited with {rc}:\n{qemu_stderr_fpath.read_text()}")
                 return False
 
-        #     # TODO: This seems like overkill atm?
-        #     # Loading the state runs in the daemon after it detaches: status is "inmigrate"
-        #     # until the RAM is loaded, then the guest starts ("running"). On a failed load
-        #     # QEMU exits, so watch the pid as well.
+            # TODO: This seems like overkill atm?
+            # Loading the state runs in the daemon after it detaches: status is "inmigrate"
+            # until the RAM is loaded, then the guest starts ("running"). On a failed load
+            # QEMU exits, so watch the pid as well.
             pid = read_pid(pidfile_fpath)
-        #     status = None
-        #     deadline = time.monotonic() + 120
-        #     try:
-        #         with qmp.QmpClient(qmp_fpath) as mon:
-        #             while time.monotonic() < deadline:
-        #                 status = mon.execute(qmp.QueryStatus()).status
-        #                 if status == "running":
-        #                     break
-        #                 time.sleep(0.2)
-        #     except (OSError, ConnectionError) as e:
-        #         status = f"QMP lost ({e})"
-        #     if status != "running":
-        #         alive = pid is not None and is_alive(pid)
-        #         print(f"VM did not resume from {state_fpath} (status: {status}, qemu "
-        #               f"{'still running' if alive else 'exited'}).")
-        #         print(f"qemu stderr:\n{qemu_stderr_fpath.read_text()}")
-        #         return False
+
+
+
+
+
+            status = None
+            deadline = time.monotonic() + 120
+            try:
+                with qmp.QmpClient(qmp_fpath) as mon:
+                    while time.monotonic() < deadline:
+                        status = mon.execute(qmp.QueryStatus()).status
+                        if status == "running":
+                            break
+                        time.sleep(0.2)
+            except (OSError, ConnectionError) as e:
+                status = f"QMP lost ({e})"
+            if status != "running":
+                alive = pid is not None and is_alive(pid)
+                print(f"VM did not resume from {state_fpath} (status: {status}, qemu "
+                      f"{'still running' if alive else 'exited'}).")
+                print(f"qemu stderr:\n{qemu_stderr_fpath.read_text()}")
+                return False
+
+
+
+
+
 
             print(f"Resumed {izba.profile_name}:{izba.profile_inst}/{izba.overlay_name} (pid {pid}); "
                   f"ssh -p {ssh_host_port} user@127.0.0.1")

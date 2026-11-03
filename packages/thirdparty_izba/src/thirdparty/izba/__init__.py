@@ -358,7 +358,7 @@ class Izba():
 
         # The profile picks the overlay (from create) and checks it isn't already running.
         if not (self.inst_path / "images" / "origin-overlay.state").exists():
-            print(f"No saved VM state for {self.type_name}:{self.name}. Run build first.")
+            print(f"No saved VM state for {self.profile_name}:{self.profile_inst}. Run build first.")
             return False
 
         return self.profile.start_instance_vm(self, **opts)
