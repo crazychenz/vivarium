@@ -1,5 +1,27 @@
 #!/usr/bin/env python3
 
+# 
+'''
+TODO: Enable virtiofsd in the origin-overlay qemu launch.
+
+The ideal situation is to have the ability to arbitrarily volume mount (-v)
+host paths into guest paths. In docker, you literally can do this from any
+path due to the way the namespacing works. `izba` assumes namespacing is not
+enabled and therefore we need to rethink what we're doing.
+
+In brief, consider the OVERLAY_PATH/mnt the root of the host. We can point
+virtiofsd at this path. That entire tree can then be mounted to the VM. Once
+that is complete, we can bind mount from that folder in the guest to anywhere
+we want. If we want something from outside of OVERLAY_PATH/mnt to be accessible
+to the VM, we must have mount permissions on the host and bind mount (or some
+kind of fuse mount) from the host path to OVERLAY_PATH/mnt.
+
+There are many edge cases with this depending on the system features
+available to the user. izba assumes nearly nothing is setup and therefore this
+is a clear possibility that anything not in OVERLAY_PATH/mnt will not be
+sharable with the VM.
+'''
+
 import logging
 log = logging.getLogger(__name__)
 
@@ -806,28 +828,42 @@ class IzbaCrtProfile(BaseProfile):
                 condition=True
             )
 
+
+        # TODO:
+        # TODO: Only do package installs and reboot required things here.
+        # TODO: Do user setup in origin-overlay setup.
+        # TODO: Recycle base-image.qcow2 if base os, kernel, initrd, and seed remains the same.
+        # TODO:
+
+
         return cc.CloudConfig(
-            #disable_root=False,
-            #ssh_pwauth=True,
+            # Note: I prefer to enable root via host ssh than allow user to sudo.
+            disable_root=False, # CAUTION
+            # disable_root=True,
+            # CAUTION: ssh_pwauth=True,
+            # ! Fix pydantic code to not allow "groups={docker:None}".
             groups={"docker":[]},
             users=[
                 cc.Users(
                     name="user",
                     shell="/bin/bash",
-                    groups=["docker", "sudo"],
-                    sudo="ALL=(ALL) NOPASSWD:ALL", # ! Do we really want this?
+                    groups=[
+                        "docker",
+                        # CAUTION: "sudo",
+                    ],
+                    # CAUTION: sudo="ALL=(ALL) NOPASSWD:ALL",
                     ssh_authorized_keys=[open(izba.inst_path / "misc" / "ssh" / "id_ed25519.pub").read()],
                     lock_passwd=True,
-                    #lock_passwd=False,
-                    #passwd='gofish',
+                    # CAUTION: lock_passwd=False,
+                    # CAUTION: passwd='gofish',
                 ),
                 cc.Users(
                     name="root",
                     shell="/bin/bash",
                     ssh_authorized_keys=[open(izba.inst_path / "misc" / "ssh" / "id_ed25519.pub").read()],
                     lock_passwd=True,
-                    #lock_passwd=False,
-                    #passwd='gofish',
+                    # CAUTION: lock_passwd=False,
+                    # CAUTION: passwd='gofish',
                 ),
             ],
             # write_files=[
