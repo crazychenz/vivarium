@@ -127,6 +127,8 @@ class IzbaCrtProfile(BaseProfile):
         meta_data_fpath = izba.inst_path / "context" / "meta-data"
         meta_data_fpath.write_text(yaml.dump(self.cloud_init_meta_data))
 
+        # TODO: Consider: cloud-init schema -c user-data --annotate
+
         make_seed(path=seed_path, tree=(izba.inst_path / "context"))
 
         return True
@@ -282,6 +284,8 @@ class IzbaCrtProfile(BaseProfile):
     def _qemu_init_origin_overlay(self, izba):
         ### Do first boot of origin-overlay
 
+        print("Doing inital boot of origin overlay.")
+
         kernel_cmdline = ' '.join([
             f"root=LABEL=cloudimg-rootfs",
             "rw",
@@ -387,10 +391,11 @@ class IzbaCrtProfile(BaseProfile):
                     subprocess.run(qemu_cmd_obj.to_args(), stdout=qemu_stderr, stderr=qemu_stderr)
 
                 # --- Wait for cloud-init to complete and sshd to be ready. ---
+                print("Waiting for cloud-init to finish before doing snapshot.")
                 from thirdparty.izba.subprocess.ssh import pidfile_ssh_wait
                 log.debug(f"Waiting for SSH. port {ssh_host_port} pidfile {pidfile_fpath} ")
                 # Implicitly waits for 5 minutes.
-                identity_fpath = Path("misc") / "ssh" / "id_ed25519"
+                identity_fpath = izba.inst_path / "misc" / "ssh" / "id_ed25519"
                 pidfile_ssh_wait(pidfile=pidfile_fpath, port=ssh_host_port, identity_fpath=identity_fpath)
 
                 # --- Save the state and quit the VM ---
@@ -802,13 +807,9 @@ class IzbaCrtProfile(BaseProfile):
             )
 
         return cc.CloudConfig(
-            # OpenRC doesn't hand cloud-init's stdout/stderr to the console, so runcmd
-            # output would otherwise only land in the log file. Tee it to the serial
-            # console, which qemu writes to logs/console.log for tail_follow.
-            output=cc.Output(all="| tee -a /var/log/cloud-init-output.log /dev/ttyS0"),
-            disable_root=False,
-            ssh_pwauth=True,
-            groups=["docker"],
+            #disable_root=False,
+            #ssh_pwauth=True,
+            groups={"docker":[]},
             users=[
                 cc.Users(
                     name="user",
@@ -837,6 +838,17 @@ class IzbaCrtProfile(BaseProfile):
             #     cc.WriteFile(path="/etc/containers/registries.conf.d/00-crt.conf",
             #                 content=REGISTRIES_CONF, permissions="0644"),
             # ],
+            apt=cc.Apt(
+                sources={
+                    "docker.list": cc.Sources(
+                        source="deb [arch=amd64] https://download.docker.com/linux/ubuntu $RELEASE stable",
+                        keyid="9DC858229FC7DD38854AE2D88D81803C0EBFCD88",
+                        keyserver="keyserver.ubuntu.com",
+                    ),
+                },
+            ),
+            #package_update=True,
+            #package_upgrade=False,
             packages=[
                 "ca-certificates",
                 "curl",

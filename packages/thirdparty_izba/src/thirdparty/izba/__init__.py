@@ -63,7 +63,7 @@ class Izba():
                     
                 else:
                     self.profile = profile
-                    self.profile_name = type(profile).type_name
+                    self.profile_name = type(profile).type_name()
 
         elif overlay_name is None:
             # Assuming profile is not None
@@ -182,7 +182,7 @@ class Izba():
 
         # Only do these if golden does not exist.
         if (self.inst_path / "images" / "base-image.qcow2").exists():
-            print(f"Base image already exists for {self.type_name}:{self.name}. Run rmi first.")
+            print(f"Base image already exists for {self.profile_name}:{self.profile_inst}. Run rmi first.")
             return False
 
         # Download the OS, kernel, and initrd
@@ -320,7 +320,11 @@ class Izba():
     def stop(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
+        if self.profile is None:
+            return False
+
         self.profile.stop_instance_vm(self)
+        return True
 
 
     def logs(self, user='user', golden=False, **opts):

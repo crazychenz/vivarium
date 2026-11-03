@@ -62,7 +62,7 @@ def pidfile_ssh_wait(
         pid = read_pid(pidfile)
         if pid and is_alive(pid) and is_qemu_process(pid):    
             try:
-                print(f"Running: {' '.join(cmd)}")
+                log.debug(f"Running: {' '.join(cmd)}")
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
@@ -70,12 +70,12 @@ def pidfile_ssh_wait(
                     timeout=10,
                 )
                 if result.returncode == 2:
-                    print("SUCCESS IN SSH COMMAND")
+                    log.debug("SUCCESS IN SSH COMMAND")
                     return
-                print(f"BAD RETURN: {result.returncode}")
+                log.debug(f"BAD RETURN: {result.returncode}")
             except subprocess.TimeoutExpired:
                 pass
-            print(f"Sleeping for {interval} seconds.")
+            log.debug(f"Sleeping for {interval} seconds.")
             time.sleep(interval)
         else:
             raise Exception(f"Process no longer exists.")
