@@ -25,6 +25,67 @@ def simple_tty_ssh_run(
     subprocess.run(cmd)
 
 
+def stream_ssh_run(
+    destination="user@127.0.0.1",
+    port=2222,
+    command=None,
+    identity_fpath=None,
+    stream=None,
+    ssh="ssh",
+    known_hosts=False,
+    extra_args=[],
+    chunk_size=65536):
+    """Like simple_tty_ssh_run, but feeds `stream` into the remote command's stdin.
+
+    `stream` defaults to sys.stdin. Streams backed by a real file descriptor are
+    handed straight to ssh (so an interactive tty still works); any other
+    file-like object (BytesIO, StringIO, ...) is copied into ssh through a pipe.
+    Returns the ssh exit code.
+    """
+
+    import io
+    import sys
+    import subprocess
+
+    if stream is None:
+        stream = sys.stdin
+
+    cmd = [ssh, '-p', f'{port}', *extra_args]
+    if not known_hosts:
+        cmd.extend([
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+        ])
+    if identity_fpath:
+        cmd.extend(['-i', str(identity_fpath)])
+    cmd.append(destination)
+    if command:
+        cmd.append(command)
+
+    try:
+        fd = stream.fileno()
+    except (AttributeError, OSError, io.UnsupportedOperation):
+        fd = None
+
+    if fd is not None:
+        return subprocess.run(cmd, stdin=fd).returncode
+
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    try:
+        while True:
+            chunk = stream.read(chunk_size)
+            if not chunk:
+                break
+            if isinstance(chunk, str):
+                chunk = chunk.encode()
+            proc.stdin.write(chunk)
+        proc.stdin.close()
+    except BrokenPipeError:
+        # Remote command exited before consuming all input.
+        pass
+    return proc.wait()
+
+
 def pidfile_ssh_wait(
     pidfile=None,
     destination="user@127.0.0.1",

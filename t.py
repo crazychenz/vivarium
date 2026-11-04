@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import yaml
 
+
 def build_cloud_config():
     import thirdparty.qemu.cloud_init.lib as cc
     user_data = cc.CloudConfig(
