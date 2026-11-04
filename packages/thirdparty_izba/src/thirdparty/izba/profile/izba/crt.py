@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import sys
 import logging
 log = logging.getLogger(__name__)
 
@@ -25,10 +26,6 @@ is a clear possibility that anything not in OVERLAY_PATH/mnt will not be
 sharable with the VM.
 '''
 
-import logging
-log = logging.getLogger(__name__)
-
-import sys
 from pathlib import Path
 
 from thirdparty.izba.cli.registrar import ProfileIndex
@@ -766,13 +763,9 @@ class IzbaCrtProfile(BaseProfile):
 
 
     # Executes command in VM (via SSH)
-    def exec_instance_vm(self, izba, user='user', command=None, stream=None):
+    def exec_instance_vm(self, izba, user='user', command=None, stdin=None):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
-        # print(f"base_path: {izba.base_path}")
-        # print(f"profiles_path: {izba.profiles_path}")
-        # raise NotImplementedError()
 
-        import sys
         from pathlib import Path
         from thirdparty.izba.subprocess import workdir, read_pid, is_alive
         from thirdparty.izba.subprocess.qemu import is_qemu_process
@@ -784,14 +777,13 @@ class IzbaCrtProfile(BaseProfile):
         pid = read_pid(pidfile_fpath)
         if pid and is_alive(pid) and is_qemu_process(pid):
             ssh_host_port_fpath = izba.overlay_path / "run" / "ssh_host_port"
-            from thirdparty.izba.subprocess.ssh import stream_ssh_run
-            # TODO: Add command from **opts
-            stream_ssh_run(
+            from thirdparty.izba.subprocess.ssh import stdin_ssh_run
+            stdin_ssh_run(
                 destination=f'{user}@127.0.0.1',
                 port=int(ssh_host_port_fpath.read_text().strip()),
                 identity_fpath=profile_ssh_identity,
                 command=' '.join(command) if command else None,
-                stream=stream if stream is not None else sys.stdin,
+                stdin=stdin if stdin is not None else sys.stdin,
             )
             return True
         else:

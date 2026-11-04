@@ -25,12 +25,12 @@ def simple_tty_ssh_run(
     subprocess.run(cmd)
 
 
-def stream_ssh_run(
+def stdin_ssh_run(
     destination="user@127.0.0.1",
     port=2222,
     command=None,
     identity_fpath=None,
-    stream=None,
+    stdin=None,
     ssh="ssh",
     known_hosts=False,
     extra_args=[],
@@ -47,8 +47,8 @@ def stream_ssh_run(
     import sys
     import subprocess
 
-    if stream is None:
-        stream = sys.stdin
+    if stdin is None:
+        stdin = sys.stdin
 
     cmd = [ssh, '-p', f'{port}', *extra_args]
     if not known_hosts:
@@ -63,7 +63,7 @@ def stream_ssh_run(
         cmd.append(command)
 
     try:
-        fd = stream.fileno()
+        fd = stdin.fileno()
     except (AttributeError, OSError, io.UnsupportedOperation):
         fd = None
 
@@ -73,7 +73,7 @@ def stream_ssh_run(
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     try:
         while True:
-            chunk = stream.read(chunk_size)
+            chunk = stdin.read(chunk_size)
             if not chunk:
                 break
             if isinstance(chunk, str):

@@ -178,9 +178,9 @@ def izba_rmi_func(args, config):
 
 # If instance image missing, call create()
 def izba_run_func(args, config):
+    from thirdparty.izba.subprocess import try_stdin
     Izba(config, profile=args.profile, overlay_name=args.name)\
-    .run(network=args.network, user=args.user, command=args.cmd)
-
+    .run(network=args.network, user=args.user, command=args.cmd, stdin=try_stdin())
 
 
 # Copy/adjust golden image into instance image (with qemu-img).
@@ -203,7 +203,8 @@ def izba_start_func(args, config):
 
 # Run ssh command in VM
 def izba_exec_func(args, config):
-    Izba(config, overlay_name=args.name).exec(user=args.user, command=args.cmd)
+    from thirdparty.izba.subprocess import try_stdin
+    Izba(config, overlay_name=args.name).exec(user=args.user, command=args.cmd, stdin=try_stdin())
 
 
 def izba_logs_func(args, config):

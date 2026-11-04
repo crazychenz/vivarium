@@ -335,14 +335,14 @@ class Izba():
 
 
     # Run ssh command in VM
-    def exec(self, user='user', command=None, **opts) -> bool:
+    def exec(self, user='user', command=None, stdin=None, **opts) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        self.profile.exec_instance_vm(self, user=user, command=command)
+        self.profile.exec_instance_vm(self, user=user, command=command, stdin=stdin)
 
 
     # If instance image missing, call create()
-    def run(self, network='none', user='user', command=None, **opts):
+    def run(self, network='none', user='user', command=None, stdin=None, **opts):
         '''
             run is intended to create, start, exec a given command, and optionally stop an instance VM.
             run is the only command that should implicitly do a sequence of create, start, exec, stop.
@@ -362,7 +362,7 @@ class Izba():
         self.profile.run_ready_wait(self)
         
         ret = False
-        if self.exec(network='none', user='user', command=command, **opts):
+        if self.exec(network='none', user='user', command=command, stdin=None, **opts):
             ret = True
 
         self.stop(**opts)

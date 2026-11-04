@@ -7,6 +7,18 @@ log = logging.getLogger(__name__)
 import subprocess
 
 
+def try_stdin():
+    import os
+    import sys
+    import stat
+    # Forward stdin to the remote command only when it's a pipe (e.g. `cat f | izba exec ...`).
+    try:
+        piped = stat.S_ISFIFO(os.fstat(sys.stdin.fileno()).st_mode)
+    except (AttributeError, OSError, ValueError):
+        piped = False
+    return sys.stdin if piped else None
+
+
 def run_with_timeout(args, timeout, grace=5):
     proc = subprocess.Popen(
         args,
