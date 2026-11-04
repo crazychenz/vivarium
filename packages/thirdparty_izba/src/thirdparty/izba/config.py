@@ -12,6 +12,10 @@ def xdg_config_home() -> Path:
     return Path(xdg) if xdg else Path.home() / ".config"
 
 
+def izba_xdg_config_home() -> Path:
+    return xdg_config_home() / "izba" / "config.yaml"
+
+
 def deep_merge(base: dict, overlay: dict) -> dict:
     result = dict(base)
     for key, value in overlay.items():
@@ -47,30 +51,30 @@ def baseline_empty_config():
     }
 
 
-def load_izba_config(config:dict={}, config_path=None):
+def load_izba_config(config_path=None, user_config={}):
     import yaml
-    import thirdparty.vivarium.util as vivarium_util
 
     if config_path is None:
         config_path = xdg_config_home() / "izba" / "config.yaml"
+        if not config_path.exists():
+            log.info(f"Config not found at: {config_path}, using defaults.")
+    else:
+        config_path = Path(config_path).resolve()
+        if not config_path.exists():
+            print(f"Config not found at: {config_path}, using defaults.")
 
-    config_path = config_path.resolve()
+    config = baseline_empty_config()
+    if config_path.exists():
+        config = deep_merge(config, yaml.safe_load(config_path.read_text()))
 
-    if not config_path.exists():
-        print(f"ERROR: {config_path} configuration does not exist.")
-        exit(1)
-
-    # Always start with baseline.
-    config = deep_merge(baseline_empty_config(), config)
-
-    with open(str(config_path)) as f:
-        config = deep_merge(config, yaml.safe_load(f))
-    
     # --- Apply environment overrides ---
 
     config["base_path"] = os.environ.get("IZBA_BASE_PATH", config["base_path"])
     config["profiles_path"] = os.environ.get("IZBA_PROFILES_PATH", config["profiles_path"])
     config["overlays_path"] = os.environ.get("IZBA_OVERLAYS_PATH", config["overlays_path"])
+
+    # User config has priority here, but should never be used in base library.
+    config = deep_merge(config, user_config)
 
     return config
 

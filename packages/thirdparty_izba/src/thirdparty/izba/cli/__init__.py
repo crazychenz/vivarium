@@ -12,7 +12,8 @@ from thirdparty.izba import Izba
 def init_argparse():
     # --- izba
     izba_parser = argparse.ArgumentParser(prog="izba")
-    izba_parser.add_argument("--config", dest="config", action="store", help="path to config.yaml")
+    from thirdparty.izba.config import izba_xdg_config_home
+    izba_parser.add_argument("--config", dest="config", action="store", help="path to config.yaml", default=izba_xdg_config_home())
     izba_parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
     izba_parser.add_argument(
         "--log-level",
@@ -279,19 +280,8 @@ def main():
         module, level_name = spec.split(":")
         logging.getLogger(module).setLevel(getattr(logging, level_name.upper()))
 
-    config = {}
-
-    import thirdparty.izba.config as cfg
-    # Default config
-    config = cfg.baseline_empty_config()
-    # Default config path
-    config_path = cfg.xdg_config_home() / "izba" / "config.yaml"
-    if args.config:
-        config_path = Path(args.config)
-    if config_path.exists():
-        config = cfg.load_izba_config(config_path=config_path)
-    else:
-        log.info(f"Config not found at: {config_path}, using defaults.")
+    from thirdparty.izba.config import load_izba_config
+    config = load_izba_config(config_path=args.config)
  
     # TODO: translate profile alias to Profile object and pass to func.
 

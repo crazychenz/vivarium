@@ -10,7 +10,8 @@ from pathlib import Path
 def baseline_empty_config():
     return {
         # Consider having a "dotenv" for credentials.
-        "base_dir": None,
+        "base_path": None,
+        "rigs_path": None,
 
         # Apkd has downloads in config. Download overrides in config not advised
         # as a default because we want package updates to include updates to downloads.
@@ -74,27 +75,34 @@ def save_vivarium_config(config:dict={}, config_path=None, force:bool=False):
         yaml.dump(vivarium_util.deep_merge(baseline_empty_config(), config), f, sort_keys=False)
 
 
-def implicit_base_dir():
+def implicit_base_path():
     # Worst case, use local folder.
-    base_dir = Path('.') / "vivarium"
+    base_path = Path('.') / "vivarium"
     
     # Best implicit case, use venv as base prefix.
     if sys.prefix != sys.base_prefix:
         # We're in a venv, use it.
-        base_dir = Path(sys.prefix) / "vivarium"
+        base_path = Path(sys.prefix) / "vivarium"
 
-    return base_dir.resolve()
+    return base_path.resolve()
 
 
-def resolve_base_dir(config=None):
+def implicit_rigs_path(base_path=(Path('.') / "vivarium")):
+    return (Path(base_path) / "rigs").resolve()
+
+
+def resolve_base_path(config=None):
     # Assumes config already loaded.
-    if "base_dir" in config and config["base_dir"] is not None:
-        return Path(config["base_dir"]).resolve()
+    if config and "base_path" in config and config["base_path"] is not None:
+        return Path(config["base_path"]).resolve()
 
-    return implicit_base_dir()
-
-
+    return Path(implicit_base_path())
 
 
+def resolve_rigs_path(config=None):
+    # Assumes config already loaded.
+    if config and "rigs_path" in config and config["rigs_path"] is not None:
+        return Path(config["rigs_path"]).resolve()
 
+    return Path(implicit_rigs_path(base_path=resolve_base_path(config)))
 
