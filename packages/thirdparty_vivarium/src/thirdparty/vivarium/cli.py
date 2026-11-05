@@ -24,6 +24,7 @@ def init_argparse():
     viv_parser = argparse.ArgumentParser(prog="vivarium")
     viv_parser.add_argument("--config", dest="config", action="store", help="path to config.yaml")
     viv_parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
+    viv_parser.add_argument("--breakpoint", action="store_true", default=False, help="Break before exist on exception.")
     viv_parser.add_argument(
         "--log-level",
         metavar="MODULE:LEVEL",
@@ -171,8 +172,16 @@ def main():
     # # TODO: Read build tools from config or find newest.
     # apply_env(base_dir)
 
-    args.func(args, config)
-
+    try:
+        args.func(args, config)
+    except Exception as e:
+        # TODO: Unlink golden image.
+        print(f"Error: {e}")
+        if args.verbose > 0:
+            import traceback
+            traceback.print_exc()
+        if args.breakpoint:
+            breakpoint()
 
 if __name__ == "__main__":
     main()

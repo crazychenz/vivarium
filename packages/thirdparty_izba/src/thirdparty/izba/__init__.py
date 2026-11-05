@@ -22,6 +22,7 @@ class Izba():
 
         self.driver = None
         self._with_driver = False
+        self._with_image = False
         self._with_overlay = False
 
 
@@ -103,9 +104,6 @@ class Izba():
         self.overlay_path = self.overlays_path / self.overlay_name
         if not self.overlay_path.exists():
             raise Exception(f"Overlay {overlay} does not exist. Run create or run first.")
-
-        if self._with_driver:
-            raise Exception("Use with_driver() before with_overlay().")
 
         if self.driver is None:
             # We want to infer driver from "driver" file.
@@ -204,7 +202,7 @@ class Izba():
 
 
     # Build base image.
-    def build(self, tags=None, **opts):
+    def build(self, tags=None, exist_ok=False, **opts):
         '''
             build is for building base images
             actual builds happen in construction under an auto-generated uuid7.
@@ -216,6 +214,13 @@ class Izba():
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_driver().")
 
         # TODO: Forbid all tags that look like uuid7.hex
+
+        for tag in tags:
+            tag_path = self.images_path / "by_name" / tag
+            if tag_path.exists():
+                if exist_ok:
+                    return True
+                raise Exception(f"Tag {tag} already used. Run rmi first.")
 
         from thirdparty.izba.uuid import uuid7
         self.imageid = uuid7()
@@ -258,7 +263,7 @@ class Izba():
         return True
 
 
-    def create(self, name=None, **opts) -> bool:
+    def create(self, name=None, exist_ok=False, **opts) -> bool:
         '''
             create will create a new overlay disk image backed by origin-overlay
         '''
@@ -274,6 +279,8 @@ class Izba():
             # TODO: Verify name contains no invalid characters
             self.overlay_path = self.overlays_path / name
             if self.overlay_path.exists():
+                if exist_ok:
+                    return True
                 raise Exception(f"Overlay {name} already exists. Run rm first.")
             self.overlay_name = self.overlay_path.name
 
@@ -443,14 +450,14 @@ class Izba():
 
 
     # If instance image missing, call create()
-    def start(self, **opts) -> bool:
+    def start(self, exist_ok=False, **opts) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self._with_overlay:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
         
         # TODO: Do some sanity checks here.
 
-        return self.driver.start_izba(self, **opts)
+        return self.driver.start_izba(self, exist_ok=exist_ok, **opts)
 
 
     # Kill with pidfile

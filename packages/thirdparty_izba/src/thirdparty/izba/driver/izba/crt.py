@@ -549,7 +549,7 @@ class IzbaCrtDriver():
     # Starts the VM and leaves running until kill or stop.
     # Resumes the RAM/device state saved in images/origin-overlay.state (see
     # build_base_disk_image) on top of a fresh overlay disk created by Izba.create().
-    def start_izba(self, izba, console='stdout', **opts):
+    def start_izba(self, izba, console='stdout', exist_ok=False, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         import subprocess
@@ -611,8 +611,9 @@ class IzbaCrtDriver():
 
         pid = read_pid(pidfile_fpath)
         if pid is not None and is_alive(pid):
-            print(f"{izba.overlay_name} is already running (pid {pid}). Run stop first.")
-            return False
+            if exist_ok:
+                return True
+            raise Exception(f"{izba.overlay_name} is already running (pid {pid}). Run stop first.")
         pidfile_fpath.unlink(missing_ok=True)
 
         # Paths outside the overlay are absolute; QEMU runs from the overlay folder.

@@ -44,12 +44,21 @@ class VivAgentProfile():
         izba_config = load_izba_config()
 
         from thirdparty.izba import Izba
-        Izba(izba_config, profile='crt').build()
-        Izba(izba_config, profile='crt', overlay_name='default').create(network='slirp', user='user')
-        Izba(izba_config, overlay_name='default').start()
-        Izba(izba_config, overlay_name='default').exec(user='user', command=['docker', 'ps'])
+        driver_name='crt'
+        image_name='crt'
+        overlay_name='crt'
 
-        # ! TODO: Test izba overlay_name when not default!
+        izba = Izba(izba_config)
+        izba.with_driver(driver=driver_name)
+        izba.build(tags=[image_name], exist_ok=True)
+        izba.with_image(image=image_name)
+        izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
+        izba.with_overlay(overlay_name)
+        izba.start(exist_ok=True)
+
+        Izba(izba_config).with_overlay(overlay='crt').exec(user='user', command=['docker', 'ps']) #, stdin=try_stdin())
+        #self.stop(**opts)
+        #self.rm(force=True, **opts)
 
         # TODO: izba agent VM with VivAgentIzbaProfile profile
         # Izba(izba_config, profile='vivarium.agent').build()
