@@ -269,11 +269,13 @@ class Izba():
         from thirdparty.izba.path import generate_overlay_path, image_name_encode
         if name is None:
             self.overlay_path = generate_overlay_path(self.overlays_path)
+            self.overlay_name = self.overlay_path.name
         else:
             # TODO: Verify name contains no invalid characters
             self.overlay_path = self.overlays_path / name
             if self.overlay_path.exists():
                 raise Exception(f"Overlay {name} already exists. Run rm first.")
+            self.overlay_name = self.overlay_path.name
 
         # Create standard folders for build path
         for folder in ['artifacts', 'images', 'logs', 'run', 'mnt']:
@@ -443,83 +445,80 @@ class Izba():
     # If instance image missing, call create()
     def start(self, **opts) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        # if not self._with_overlay:
-        #     raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+        if not self._with_overlay:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+        
+        # TODO: Do some sanity checks here.
 
-        # if self.profile is None:
-        #     # When given an overlay without a profile, immediately fail.
-        #     return False
-
-        # # The profile picks the overlay (from create) and checks it isn't already running.
-        # if not (self.inst_path / "images" / "origin-overlay.state").exists():
-        #     print(f"No saved VM state for {self.profile_name}:{self.profile_inst}. Run build first.")
-        #     return False
-
-        # return self.profile.start_instance_vm(self, **opts)
+        return self.driver.start_izba(self, **opts)
 
 
     # Kill with pidfile
     def stop(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        # if not self._with_overlay:
-        #     raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+        if not self._with_overlay:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
 
-        # if self.profile is None:
-        #     return False
+        if self.driver is None:
+            log.error("Driver is unavailable. Exiting.")
+            return False
 
-        # self.profile.stop_instance_vm(self)
+        self.driver.stop_izba(self)
         return True
 
 
     def logs(self, user='user', golden=False, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        # if not self._with_overlay:
-        #     raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+        if not self._with_overlay:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
 
-        # logfile_fpath = self.overlay_path / "logs" / "console.log"
-        # print(logfile_fpath.read_text())
+        logfile_fpath = self.overlay_path / "logs" / "console.log"
+        print(logfile_fpath.read_text())
 
 
     # Run ssh command in VM
     def exec(self, user='user', command=None, stdin=None, **opts) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        # if not self._with_overlay:
-        #     raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+        if not self._with_overlay:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
 
-        # self.profile.exec_instance_vm(self, user=user, command=command, stdin=stdin)
+        self.driver.exec_izba_command(self, user=user, command=command, stdin=stdin)
 
 
     # If instance image missing, call create()
-    def run(self, network='none', user='user', command=None, stdin=None, **opts):
+    def run(self, name=None, network='none', user='user', command=None, stdin=None, **opts):
         '''
             run is intended to create, start, exec a given command, and optionally stop an instance VM.
             run is the only command that should implicitly do a sequence of create, start, exec, stop.
             run should not run build
         '''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        # if not self._with_image:
-        #     raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+        if not self._with_image:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_image().")
 
-        # if not self.create(network='none', console='none', **opts):
-        #     print("Failed to create instance.")
-        #     return False
+        if not self.create(name=name, network='none', console='none', **opts):
+            print("Failed to create instance.")
+            return False
         
-        # if not self.start(network='none', console='none', **opts):
-        #     print("Failed to start instance.")
-        #     return False
-
-        # # Wait until the overlay is ready to receive commands.
-        # self.profile.run_ready_wait(self)
+        # Do the with_overlay stuff required for start, exec, stop, and rm
+        self.with_overlay(name)
         
-        # ret = False
-        # if self.exec(network='none', user='user', command=command, stdin=None, **opts):
-        #     ret = True
+        if not self.start(network='none', console='none', **opts):
+            print("Failed to start instance.")
+            return False
 
-        # self.stop(**opts)
+        # Wait until the overlay is ready to receive commands.
+        self.driver.run_ready_wait(self)
         
-        # self.rm(force=True, **opts)
+        ret = False
+        if self.exec(network='none', user='user', command=command, stdin=None, **opts):
+            ret = True
 
-        # return ret
+        self.stop(**opts)
+        
+        self.rm(force=True, **opts)
+
+        return ret
 
 
     # Copy from VM to host:

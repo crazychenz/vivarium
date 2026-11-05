@@ -549,8 +549,7 @@ class IzbaCrtDriver():
     # Starts the VM and leaves running until kill or stop.
     # Resumes the RAM/device state saved in images/origin-overlay.state (see
     # build_base_disk_image) on top of a fresh overlay disk created by Izba.create().
-    def start_instance_vm(self, izba, console='stdout', **opts):
-
+    def start_izba(self, izba, console='stdout', **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         import subprocess
@@ -560,13 +559,13 @@ class IzbaCrtDriver():
         from thirdparty.qemu.qapi import qmp
 
         # TODO: Make overlay-X dynamic
-        overlay_fpath = izba.overlays_path / izba.overlay_name
-        if not overlay_fpath.exists():
+        if not izba.overlay_path.exists():
             print(f"Overlay for overlay {izba.overlay_name} not built. Run build first.")
             return False
 
-        profile_images_path = izba.inst_path / "images"
-        state_fpath = profile_images_path / "origin-overlay.state"
+        # Note: image_images_path <- IZBA_BASE_PATH/images/by_id/IMAGE_ID/images
+        image_images_path = izba.image_path / "images"
+        state_fpath = image_images_path / "origin-overlay.state"
         if not state_fpath.exists():
             print(f"No saved VM state at {state_fpath}. Run build first.")
             return False
@@ -598,11 +597,13 @@ class IzbaCrtDriver():
         qemu_stderr_fpath = logs_fpath / "qemu-stderr.log"
 
         overlay_image_fpath = images_fpath / "overlay.qcow2"
-        seed_fpath = profile_images_path / "seed.iso"
         pidfile_fpath = run_fpath / "qemu.pid"
         qmp_fpath = run_fpath / "qemu.qmp"
-        kernel_fpath = profile_images_path / "vmlinuz"
-        initrd_fpath = profile_images_path / "initrd.img"
+
+        # Read-only images files we use from parent images
+        seed_fpath = image_images_path / "seed.iso"
+        kernel_fpath = image_images_path / "vmlinuz"
+        initrd_fpath = image_images_path / "initrd.img"
 
         from thirdparty.izba.network import find_free_port
         ssh_host_port = find_free_port(2222)
@@ -697,8 +698,9 @@ class IzbaCrtDriver():
                 log.error(f"qemu stderr:\n{qemu_stderr_fpath.read_text()}")
                 return False
 
-            print(f"Resumed {izba.profile_name}:{izba.profile_inst}/{izba.overlay_name} (pid {pid}); "
-                  f"ssh -p {ssh_host_port} user@127.0.0.1")
+            identity_fpath = image_images_path / "misc" / "ssh" / "id_ed25519"
+            print(f"Resumed {izba.overlay_name} via drvier {izba.driver_name} (pid {pid}); "
+                  f"ssh -i {identity_fpath} -p {ssh_host_port} user@127.0.0.1")
 
         #     # TODO: I don't like this.
         #     if console == 'stdout':
@@ -710,7 +712,7 @@ class IzbaCrtDriver():
 
 
     # Stops the VM.
-    def stop_instance_vm(self, izba):
+    def stop_izba(self, izba):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         # print(f"base_path: {izba.base_path}")
         # print(f"profiles_path: {izba.profiles_path}")
@@ -746,7 +748,7 @@ class IzbaCrtDriver():
 
 
     # Executes command in VM (via SSH)
-    def exec_instance_vm(self, izba, user='user', command=None, stdin=None):
+    def exec_izba_command(self, izba, user='user', command=None, stdin=None):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         from pathlib import Path
@@ -754,7 +756,7 @@ class IzbaCrtDriver():
         from thirdparty.izba.subprocess.qemu import is_qemu_process
 
         pidfile_fpath = izba.overlay_path / "run" / "qemu.pid"
-        profile_ssh_identity = izba.inst_path / "misc" / "ssh" / "id_ed25519"
+        identity_fpath = izba.image_path / "misc" / "ssh" / "id_ed25519"
 
         # Is the system running?
         pid = read_pid(pidfile_fpath)
@@ -764,13 +766,13 @@ class IzbaCrtDriver():
             stdin_ssh_run(
                 destination=f'{user}@127.0.0.1',
                 port=int(ssh_host_port_fpath.read_text().strip()),
-                identity_fpath=profile_ssh_identity,
+                identity_fpath=identity_fpath,
                 command=' '.join(command) if command else None,
                 stdin=stdin if stdin is not None else sys.stdin,
             )
             return True
         else:
-            print(f"Overlay {self.overlay_name} is not running")
+            print(f"Overlay {izba.overlay_name} is not running")
             return False
         
         return False
@@ -782,7 +784,7 @@ class IzbaCrtDriver():
         ssh_host_port = int((izba.overlay_path / "run" / "ssh_host_port").read_text().strip())
         log.info(f"Waiting for SSH. port {ssh_host_port} pidfile {pidfile_fpath} ")
         # Implicitly waits for 5 minutes.
-        identity_fpath = izba.inst_path / "misc" / "ssh" / "id_ed25519"
+        identity_fpath = izba.image_path / "misc" / "ssh" / "id_ed25519"
         pidfile_ssh_wait(pidfile=pidfile_fpath, port=ssh_host_port, identity_fpath=identity_fpath)
 
 

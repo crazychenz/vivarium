@@ -16,6 +16,7 @@ def init_argparse():
     from thirdparty.izba.config import izba_xdg_config_home
     izba_parser.add_argument("--config", dest="config", action="store", help="path to config.yaml", default=None)
     izba_parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
+    izba_parser.add_argument("--breakpoint", action="store_true", default=False, help="Break before exist on exception.")
     izba_parser.add_argument(
         "--log-level",
         metavar="MODULE:LEVEL",
@@ -69,7 +70,7 @@ def init_argparse():
     izba_create_parser.add_argument("--network", choices=["internet-only", "slirp", "none"], default='none')
     izba_create_parser.add_argument("--user", default='user')
     izba_create_parser.add_argument("-f", dest='force', action="store_true", default=False)
-    izba_create_parser.add_argument("--name", default=None)
+    izba_create_parser.add_argument("--name", dest='name', default=None)
     izba_create_parser.add_argument("image")
     izba_create_parser.set_defaults(func=izba_create_func)
 
@@ -110,6 +111,7 @@ def init_argparse():
     izba_run_parser.add_argument("-u", dest='user', default='user')
     izba_run_parser.add_argument("--network", choices=["internet-only", "slirp", "none"], default='none')
     izba_run_parser.add_argument("--name", default=None)
+    izba_run_parser.add_argument("image")
     izba_run_parser.set_defaults(func=izba_run_func)
     izba_run_parser.usage = (
         izba_run_parser.format_usage()
@@ -179,15 +181,15 @@ def izba_rmi_func(args, config):
 # If instance image missing, call create()
 def izba_run_func(args, config):
     from thirdparty.izba.subprocess import try_stdin
-    Izba(config).with_overlay(overlay=args.name)\
-    .run(network=args.network, user=args.user, command=args.cmd, stdin=try_stdin())
+    Izba(config).with_image(image=args.image)\
+    .run(name=args.name, network=args.network, user=args.user, command=args.cmd, stdin=try_stdin())
 
 
 # Copy/adjust golden image into instance image (with qemu-img).
 # If golden image missing, call build().
 def izba_create_func(args, config):
     Izba(config).with_image(image=args.image)\
-    .create(network=args.network, user=args.user, command=args.cmd)
+    .create(name=args.name, network=args.network, user=args.user, command=args.cmd)
 
 
 # Remove instance image (and all overlay images).
@@ -288,7 +290,16 @@ def main():
 
     # TODO: The overlay name should be randomly generated if not provided (like docker)
 
-    args.func(args, config)
+    try:
+        args.func(args, config)
+    except Exception as e:
+        # TODO: Unlink golden image.
+        print(f"Error: {e}")
+        if args.verbose > 0:
+            import traceback
+            traceback.print_exc()
+        if args.breakpoint:
+            breakpoint()
 
 
 if __name__ == "__main__":
