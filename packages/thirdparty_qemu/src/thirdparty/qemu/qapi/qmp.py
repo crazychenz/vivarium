@@ -20,7 +20,13 @@ Example::
 Commands not modelled here can be sent with :meth:`QmpClient.execute_raw`.
 """
 
+#!/usr/bin/env python3
+
 from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
 
 import json
 import socket

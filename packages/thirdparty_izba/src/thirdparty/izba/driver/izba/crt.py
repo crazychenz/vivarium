@@ -28,27 +28,16 @@ sharable with the VM.
 
 from pathlib import Path
 
-from thirdparty.izba.cli.registrar import ProfileIndex
-from thirdparty.izba.profile import BaseProfile
-
-
-ALPINE_DEFAULT_FNAME = "alpine-3.24.2-x86_64-cloudinit-r2.qcow2"
-ALPINE_DEFAULT_URL = f"https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/cloud/{ALPINE_DEFAULT_FNAME}"
-ALPINE_BOOT_FILES = ["/boot/vmlinuz-virt", "/boot/initramfs-virt"]
-
-UBUNTU_NOBLE_URL = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
-UBUNTU_NOBLE_FNAME = "noble-server-cloudimg-amd64.img"
-UBUNTU_BOOT_FILES = ["/boot/vmlinuz", "/boot/initrd.img"]
-
 # Written in an overlay folder once it has been resumed from origin-overlay.state.
 ORIGIN_RESUMED_MARKER = Path("run") / "origin-state-resumed" 
 
 
-def register_profile_crt(profile_index: ProfileIndex):
-    profile_index.register_profile_class('crt', IzbaCrtProfile)
+def register_driver_crt(driver_index: DriverIndex):
+    driver_index.register_driver_class('crt', IzbaCrtDriver)
 
 
-class IzbaCrtProfile(BaseProfile):
+# TODO: Add BaseDriver base class.
+class IzbaCrtDriver():
     def __init__(self, **opts):
 
         # Useful for troubleshooting or investigating state.
@@ -61,7 +50,6 @@ class IzbaCrtProfile(BaseProfile):
         self.base_img_path = None
         self.cloud_init_user_data = None
         self.cloud_init_meta_data = None
-        #self.golden_path = None
 
 
     @staticmethod
@@ -69,11 +57,29 @@ class IzbaCrtProfile(BaseProfile):
         return 'crt'
 
 
+    # # Download the OS, kernel, and initrd
+    # self.driver.cache_izba_base(self)
+    # # Build data that could be used by init process
+    # self.driver.build_izba_data(self)
+    # # Build configuration and init process
+    # self.driver.build_izba_init(self)
+    # # Build the bundle exposed to app
+    # self.driver.build_izba_bundle(self)
+    # # Initialize the izba
+    # self.driver.build_izba(self)
+
+
     # Download the base image we'll base golden and instance images from.
     # Depends on cached target, internet, or available mirror.
-    def cache_base(self, izba, url=UBUNTU_NOBLE_URL, fname=UBUNTU_NOBLE_FNAME):
+    def cache_izba_base(self, izba):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
+        # TODO: Make this more generic.
+        self.cache_platform = izba.config['downloads']['linux-x64']
+        self.base_os = "ubuntu"
+        
+        url = self.cache_platform[self.base_os]['upstream']
+        fname = self.cache_platform[self.base_os]['cache']
         self.base_img_path = izba.base_path / "cache" / "downloads" / fname
 
         # download image if not cached
@@ -85,81 +91,35 @@ class IzbaCrtProfile(BaseProfile):
         return True
 
 
-    # Prepare all guest data that is not cloud_config (user-data) or meta-data
-    # - scripts
-    # - dockerfiles, containerfiles, manifests, binaries, configurations
-    # Depends on: generate_ssh_keys()
-    # TODO: Do we need a golden version and an instance version?
-    def prepare_base_guest_data(self, izba):
+    def build_izba_data(self, izba):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         from thirdparty.izba.keys import generate_ssh_keys
-        generate_ssh_keys(izba.inst_path / "misc" / "ssh")
+        generate_ssh_keys(izba.build_path / "misc" / "ssh")
 
-        return True
+        # import shutil
+        # shutil.copytree(izba.gold_path / "keys", izba.gold_path / "import", dirs_exist_ok=True)
 
 
-    # Build cloud config representative of the profile's use case.
-    # Depends on: prepare_guest_data()
-    def prepare_base_cloud_config(self, izba, reboot : bool = True):
+    def build_izba_init(self, izba):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         self.cloud_init_user_data = self._build_base_cloud_config(izba, reboot=self.firstboot_reboot)
 
         import time
-        self.cloud_init_meta_data = {
-            'instance-id': f'{izba.profile_name}-{izba.profile_inst}-{int(time.time())}',
-            'local-hostname': f'{izba.profile_name}-{izba.profile_inst}',
-        }
-
-        return True
-
-
-    # When the cloud_config (ie user-data) is delivered to the VM,
-    # everything in the import folder will also be delivered.
-    # Note: user ssh keys already included in seed
-    # Depends on: prepare_guest_data()
-    def build_base_context_folder(self, izba):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        # import shutil
-        # shutil.copytree(izba.gold_path / "keys", izba.gold_path / "import", dirs_exist_ok=True)
-
-        return True
-
-
-    # Construct the seed image itself:
-    # - user-data
-    # - meta-data
-    # - keys/
-    # - import/
-    # Depends on: prepare_cloud_config(), build_import_folder()
-    def build_base_seed_image(self, izba):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        from thirdparty.qemu.cloud_init import make_seed
-        from thirdparty.qemu.cloud_init.cloud_config import cloud_config_to_yaml
-        import yaml
-
-        seed_path = izba.inst_path / "images" / "seed.iso"
+        # TODO: Add part of imageid?
         
-        user_data_fpath = izba.inst_path / "context" / "user-data"
-        user_data_fpath.write_text(cloud_config_to_yaml(self.cloud_init_user_data))
-
-        meta_data_fpath = izba.inst_path / "context" / "meta-data"
-        meta_data_fpath.write_text(yaml.dump(self.cloud_init_meta_data))
-
-        # TODO: Consider: cloud-init schema -c user-data --annotate
-
-        make_seed(path=seed_path, tree=(izba.inst_path / "context"))
+        self.cloud_init_meta_data = {
+            'instance-id': f'{izba.driver_name}-{izba.imageid.hex[-8:]}-{int(time.time())}',
+            'local-hostname': f'{izba.driver_name}-{izba.imageid.hex[-8:]}',
+        }
 
         return True
 
 
     # Copy/adjust the base to the golden (before running golden first-boot)
     # Depends on: cache_base
-    def prepare_base_disk_image(self, izba):
-        
+    def _qemu_img_create_base_image(self, izba):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         
         import thirdparty.qemu.img as qimg
@@ -169,7 +129,7 @@ class IzbaCrtProfile(BaseProfile):
             format="qcow2",
             backing_format="qcow2",
             backing_file=self.base_img_path,
-            filename=(izba.inst_path / "images" / "base-image.qcow2"),
+            filename=(izba.build_path / "images" / "base-image.qcow2"),
             size="10G")
         
         log.debug(qemu_img_cmd.to_shell())
@@ -183,10 +143,35 @@ class IzbaCrtProfile(BaseProfile):
             log.debug("---")
 
         from thirdparty.izba.extraction import extract_from_disk_image
-        # TODO: Consider moving the KERNEL_FILES to prepare_* functions.
-        extract_from_disk_image(self.base_img_path, UBUNTU_BOOT_FILES, izba.inst_path / "images")
+        # TODO: Need to get bootfiles the same way we do cache_izba_base.
+        extract_from_disk_image(self.base_img_path, self.cache_platform[self.base_os]['bootfiles'], izba.build_path / "images")
 
         return True
+
+
+    def build_izba_bundle(self, izba):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        from thirdparty.qemu.cloud_init import make_seed
+        from thirdparty.qemu.cloud_init.cloud_config import cloud_config_to_yaml
+        import yaml
+
+        seed_path = izba.build_path / "images" / "seed.iso"
+        
+        user_data_fpath = izba.build_path / "context" / "user-data"
+        user_data_fpath.write_text(cloud_config_to_yaml(self.cloud_init_user_data))
+
+        meta_data_fpath = izba.build_path / "context" / "meta-data"
+        meta_data_fpath.write_text(yaml.dump(self.cloud_init_meta_data))
+
+        # TODO: Consider: cloud-init schema -c user-data --annotate
+
+        make_seed(path=seed_path, tree=(izba.build_path / "context"))
+
+        self._qemu_img_create_base_image(izba)
+
+        return True
+
 
 
     def _qemu_build_base_image(self, izba):
@@ -204,9 +189,9 @@ class IzbaCrtProfile(BaseProfile):
 
         # TODO: Consider dynamically calculating relative paths.
         
-        logs_fpath = izba.inst_path / "logs"
-        images_fpath = izba.inst_path / "images"
-        run_fpath = izba.inst_path / "run"
+        logs_fpath = izba.build_path / "logs"
+        images_fpath = izba.build_path / "images"
+        run_fpath = izba.build_path / "run"
 
         import time
         real_log_fpath = logs_fpath / "console" / f"console-{int(time.time())}.log"
@@ -227,7 +212,7 @@ class IzbaCrtProfile(BaseProfile):
 
         # Arguments too long if we don't change folders and use relative paths.
         from thirdparty.izba.subprocess import workdir
-        with workdir(izba.inst_path):
+        with workdir(izba.build_path):
 
             import thirdparty.qemu.qapi as qapi
             qemu_cmd_obj = qapi.QemuCommand(
@@ -238,21 +223,21 @@ class IzbaCrtProfile(BaseProfile):
                 cpu="host",
                 memory="2G",
                 smp=2,
-                kernel=kernel_fpath.relative_to(izba.inst_path),
-                initrd=initrd_fpath.relative_to(izba.inst_path),
+                kernel=kernel_fpath.relative_to(izba.build_path),
+                initrd=initrd_fpath.relative_to(izba.build_path),
                 append=kernel_cmdline,
                 nodefaults=True,
                 no_user_config=True,
                 display="none",
-                serial=[qapi.ChardevFile(path=log_fpath.relative_to(izba.inst_path))],
-                qmp=[qapi.ChardevSocket(path=qmp_fpath.relative_to(izba.inst_path), server=True, wait=False)],
-                pidfile=pidfile_fpath.relative_to(izba.inst_path),
+                serial=[qapi.ChardevFile(path=log_fpath.relative_to(izba.build_path))],
+                qmp=[qapi.ChardevSocket(path=qmp_fpath.relative_to(izba.build_path), server=True, wait=False)],
+                pidfile=pidfile_fpath.relative_to(izba.build_path),
                 daemonize=True,
                 sandbox=True,
                 # --- use case specific ---
                 drives=[
-                    qapi.Drive(id="root", file=base_image_fpath.relative_to(izba.inst_path), format="qcow2", interface="none"),
-                    qapi.Drive(id="seed", file=seed_fpath.relative_to(izba.inst_path), format="raw", interface="none", readonly=True),
+                    qapi.Drive(id="root", file=base_image_fpath.relative_to(izba.build_path), format="qcow2", interface="none"),
+                    qapi.Drive(id="seed", file=seed_fpath.relative_to(izba.build_path), format="raw", interface="none", readonly=True),
                 ],
                 netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
                 devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
@@ -260,7 +245,7 @@ class IzbaCrtProfile(BaseProfile):
 
             log.debug(f"base-image qemu command: {qemu_cmd_obj.to_shell()}")
 
-            qemu_build_base_image_command_fpath = izba.inst_path / "artifacts" / "qemu_build_base_image.sh"
+            qemu_build_base_image_command_fpath = izba.build_path / "artifacts" / "qemu_build_base_image.sh"
             qemu_build_base_image_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd_obj.to_shell()}")
 
             try:
@@ -286,11 +271,11 @@ class IzbaCrtProfile(BaseProfile):
             quiet=True,
             format="qcow2",
             backing_format="qcow2",
-            backing_file=(izba.inst_path / "images" / "base-image.qcow2"),
-            filename=(izba.inst_path / "images" / "origin-overlay.qcow2"))
+            backing_file=(izba.build_path / "images" / "base-image.qcow2"),
+            filename=(izba.build_path / "images" / "origin-overlay.qcow2"))
         
         log.debug(qemu_img_cmd.to_shell())
-        create_origin_overlay_command_fpath = izba.inst_path / "artifacts" / "create_origin_overlay.sh"
+        create_origin_overlay_command_fpath = izba.build_path / "artifacts" / "create_origin_overlay.sh"
         create_origin_overlay_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_img_cmd.to_shell()}")
 
         from thirdparty.izba.subprocess import run_with_timeout
@@ -322,9 +307,9 @@ class IzbaCrtProfile(BaseProfile):
 
         # TODO: Consider dynamically calculating relative paths.
         
-        logs_fpath = izba.inst_path / "logs"
-        images_fpath = izba.inst_path / "images"
-        run_fpath = izba.inst_path / "run"
+        logs_fpath = izba.build_path / "logs"
+        images_fpath = izba.build_path / "images"
+        run_fpath = izba.build_path / "run"
 
         import time
         real_log_fpath = logs_fpath / "console" / f"console-{int(time.time())}.log"
@@ -351,7 +336,7 @@ class IzbaCrtProfile(BaseProfile):
 
         # Arguments too long if we don't change folders and use relative paths.
         from thirdparty.izba.subprocess import workdir
-        with workdir(izba.inst_path):
+        with workdir(izba.build_path):
 
             import thirdparty.qemu.qapi as qapi
             qemu_cmd_obj = qapi.QemuCommand(
@@ -362,15 +347,15 @@ class IzbaCrtProfile(BaseProfile):
                 cpu="host",
                 memory="2G",
                 smp=2,
-                kernel=kernel_fpath.relative_to(izba.inst_path),
-                initrd=initrd_fpath.relative_to(izba.inst_path),
+                kernel=kernel_fpath.relative_to(izba.build_path),
+                initrd=initrd_fpath.relative_to(izba.build_path),
                 append=kernel_cmdline,
                 nodefaults=True,
                 no_user_config=True,
                 display="none",
-                serial=[qapi.ChardevFile(path=log_fpath.relative_to(izba.inst_path))],
-                qmp=[qapi.ChardevSocket(path=qmp_fpath.relative_to(izba.inst_path), server=True, wait=False)],
-                pidfile=pidfile_fpath.relative_to(izba.inst_path),
+                serial=[qapi.ChardevFile(path=log_fpath.relative_to(izba.build_path))],
+                qmp=[qapi.ChardevSocket(path=qmp_fpath.relative_to(izba.build_path), server=True, wait=False)],
+                pidfile=pidfile_fpath.relative_to(izba.build_path),
                 daemonize=True,
                 sandbox=True,
                 # --- use case specific ---
@@ -379,8 +364,8 @@ class IzbaCrtProfile(BaseProfile):
                 # reopen fails, write permission is kept, and the migration fails with
                 # "Error in migration completion: Bad address".
                 drives=[
-                    qapi.Drive(id="root", file=Path(origin_overlay_fpath.relative_to(izba.inst_path)).resolve(), format="qcow2", interface="none"),
-                    qapi.Drive(id="seed", file=Path(seed_fpath.relative_to(izba.inst_path)).resolve(), format="raw", interface="none", readonly=True),
+                    qapi.Drive(id="root", file=Path(origin_overlay_fpath.relative_to(izba.build_path)).resolve(), format="qcow2", interface="none"),
+                    qapi.Drive(id="seed", file=Path(seed_fpath.relative_to(izba.build_path)).resolve(), format="raw", interface="none", readonly=True),
                 ],
                 netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
                 devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
@@ -391,13 +376,13 @@ class IzbaCrtProfile(BaseProfile):
                 # a failed save died in (needs the "log" trace backend, the default).
                 msg_timestamp=True,
                 log=["guest_errors"],
-                logfile=qemu_debug_fpath.relative_to(izba.inst_path),
+                logfile=qemu_debug_fpath.relative_to(izba.build_path),
                 trace=["savevm_*", "vmstate_save*", "migration_completion*", "migrate_set_state",
                        "qio_channel_file*"],
             )
 
             log.debug(f"origin-overlay qemu command: {qemu_cmd_obj.to_shell()}")
-            qemu_init_origin_overlay_command_fpath = izba.inst_path / "artifacts" / "qemu_init_origin_overlay.sh"
+            qemu_init_origin_overlay_command_fpath = izba.build_path / "artifacts" / "qemu_init_origin_overlay.sh"
             qemu_init_origin_overlay_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd_obj.to_shell()}")
 
             try:
@@ -417,7 +402,7 @@ class IzbaCrtProfile(BaseProfile):
                 from thirdparty.izba.subprocess.ssh import pidfile_ssh_wait
                 log.debug(f"Waiting for SSH. port {ssh_host_port} pidfile {pidfile_fpath} ")
                 # Implicitly waits for 5 minutes.
-                identity_fpath = izba.inst_path / "misc" / "ssh" / "id_ed25519"
+                identity_fpath = izba.build_path / "misc" / "ssh" / "id_ed25519"
                 pidfile_ssh_wait(pidfile=pidfile_fpath, port=ssh_host_port, identity_fpath=identity_fpath)
 
                 # --- Save the state and quit the VM ---
@@ -481,56 +466,54 @@ class IzbaCrtProfile(BaseProfile):
 
     # Runs the VM and shuts down when complete.
     # Depends on: prepare_golden(), build_seed_image()
-    def build_base_disk_image(self, izba, name='default', **opts):
+    def build_izba(self, izba, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         self._qemu_build_base_image(izba)
         self._create_origin_overlay(izba)
         self._qemu_init_origin_overlay(izba)
 
+        # Rebase the backing image of origin-overlay in preparationg of move
+        # from construction to images.
+
+        import thirdparty.qemu.img as qimg
+        qemu_img_cmd = qimg.Rebase(
+            quiet=True,
+            unsafe=True,
+            format="qcow2",
+            backing_format="qcow2",
+            backing_file=(izba.image_path / "images" / "base-image.qcow2"),
+            filename=(izba.build_path / "images" / "origin-overlay.qcow2")
+        )
+        
+        log.debug(qemu_img_cmd.to_shell())
+        rebase_origin_overlay_command_fpath = izba.build_path / "artifacts" / "rebase_origin_overlay.sh"
+        rebase_origin_overlay_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_img_cmd.to_shell()}")
+
+        from thirdparty.izba.subprocess import run_with_timeout
+        qemu_img_timeout = 30
+        rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
+        log.debug(f"rc: {rc} timedout: {timedout}")
+        log.debug(f"stdout:\n{out}\nstderr:\n{err}")
+        log.debug("---")
+
+        return True
+
 
     # Copy/adjust the golden to the instance
     # Depends on: build_golden(self)
-    def prepare_overlay_disk_image(self, izba):
+    def create_izba_overlay(self, izba):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        
-        # import thirdparty.qemu.img as qimg
-
-        # qemu_img_cmd = qimg.Create(
-        #     quiet=True,
-        #     format="qcow2",
-        #     backing_format="qcow2",
-        #     backing_file=(izba.gold_path / "golden.qcow2"),
-        #     filename=(izba.inst_path / "instance.qcow2"),
-        #     size="10G")
-        
-        # log.debug(qemu_img_cmd.to_shell())
-        # from thirdparty.izba.subprocess import run_with_timeout
-        # qemu_img_timeout = 30
-        # rc, out, err, timedout = run_with_timeout(qemu_img_cmd.to_args(), qemu_img_timeout)
-        # log.debug(f"rc: {rc} timedout: {timedout}")
-        # log.debug(f"stdout:\n{out}\nstderr:\n{err}")
-        # log.debug("---")
 
         import shutil
         import tempfile
         from pathlib import Path
 
         # Absolute so the backing reference stays valid whatever directory qemu runs from.
-        origin_fpath = (izba.inst_path / "images" / "origin-overlay.qcow2").resolve()
+        origin_fpath = (izba.image_path / "images" / "origin-overlay.qcow2").resolve()
         if not origin_fpath.exists():
             print(f"Origin overlay for {izba.profile_name}:{izba.profile_inst} not built. Run build first.")
             return False
-
-        # mkdtemp creates the folder atomically with a unique name.
-        # TODO: Izba class should do the auto overlay name generation.
-        # *At this point we should know the overlay_name and the folder should exist.
-        # overlays_path = self.inst_path / "overlays"
-        # overlays_path.mkdir(parents=True, exist_ok=True)
-        # overlay_path = Path(tempfile.mkdtemp(prefix="overlay-", dir=overlays_path))
-        # overlay_path.chmod(0o755)  # mkdtemp creates it 0700
-        # for folder in ['run', 'logs', 'images', 'mnt']:
-        #     (overlay_path / folder).mkdir()
 
         overlay_image_fpath = izba.overlay_path / "images" / "overlay.qcow2"
         import thirdparty.qemu.img as qimg
@@ -543,7 +526,7 @@ class IzbaCrtProfile(BaseProfile):
 
         log.debug(qemu_img_cmd.to_shell())
         # TODO: Consider artifacts folder in overlay folder?
-        prepare_overlay_disk_image_command_fpath = izba.overlay_path / "logs" / "prepare_overlay_disk_image.sh"
+        prepare_overlay_disk_image_command_fpath = izba.overlay_path / "artifacts" / "prepare_overlay_disk_image.sh"
         prepare_overlay_disk_image_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_img_cmd.to_shell()}")
 
         from thirdparty.izba.subprocess import run_with_timeout
@@ -848,7 +831,7 @@ class IzbaCrtProfile(BaseProfile):
                         # CAUTION: "sudo",
                     ],
                     # CAUTION: sudo="ALL=(ALL) NOPASSWD:ALL",
-                    ssh_authorized_keys=[open(izba.inst_path / "misc" / "ssh" / "id_ed25519.pub").read()],
+                    ssh_authorized_keys=[open(izba.build_path / "misc" / "ssh" / "id_ed25519.pub").read()],
                     lock_passwd=True,
                     # CAUTION: lock_passwd=False,
                     # CAUTION: passwd='gofish',
@@ -856,7 +839,7 @@ class IzbaCrtProfile(BaseProfile):
                 cc.Users(
                     name="root",
                     shell="/bin/bash",
-                    ssh_authorized_keys=[open(izba.inst_path / "misc" / "ssh" / "id_ed25519.pub").read()],
+                    ssh_authorized_keys=[open(izba.build_path / "misc" / "ssh" / "id_ed25519.pub").read()],
                     lock_passwd=True,
                     # CAUTION: lock_passwd=False,
                     # CAUTION: passwd='gofish',

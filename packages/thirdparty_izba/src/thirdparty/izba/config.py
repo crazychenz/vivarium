@@ -1,10 +1,15 @@
+#!/usr/bin/env python3
+
+import sys
 import logging
 log = logging.getLogger(__name__)
 
 import os
 import subprocess
-import sys
 from pathlib import Path
+
+
+DEFAULT_WORST_CASE_IZBA_BASE_PATH = Path('.') / "izba"
 
 
 def xdg_config_home() -> Path:
@@ -29,9 +34,26 @@ def deep_merge(base: dict, overlay: dict) -> dict:
 def baseline_empty_config():
     return {
         # Consider having a "dotenv" for credentials.
-        "base_path": None,
-        "profiles_path": None,
-        "overlays_path": None,
+        "base_path": None,         # base path of izba
+        "cache_path": None,        # IZBA_BASE_PATH / "cache" - long lived things for reuse
+        "construction_path": None, # IZBA_BASE_PATH / "construction" - in-motion, no-touchy!
+        "images_path": None,       # IZBA_BASE_PATH / "images" container-imgage-ish
+        "overlays_path": None,     # IZBA_BASE_PATH / "overlays" - container-ish
+
+        "downloads": {
+            "linux-x64": {
+                "alpine": {
+                    'cache': "alpine-3.24.2-x86_64-cloudinit-r2.qcow2",
+                    'upstream': f"https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/cloud/alpine-3.24.2-x86_64-cloudinit-r2.qcow2",
+                    'bootfiles': ["/boot/vmlinuz-virt", "/boot/initramfs-virt"],
+                },
+                "ubuntu": {
+                    'cache': "noble-server-cloudimg-amd64.img",
+                    'upstream': "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+                    'bootfiles': ["/boot/vmlinuz", "/boot/initrd.img"],
+                },
+            }
+        }
 
         # Apkd has downloads in config. Download overrides in config not advised
         # as a default because we want package updates to include updates to downloads.
@@ -70,7 +92,9 @@ def load_izba_config(config_path=None, user_config={}):
     # --- Apply environment overrides ---
 
     config["base_path"] = os.environ.get("IZBA_BASE_PATH", config["base_path"])
-    config["profiles_path"] = os.environ.get("IZBA_PROFILES_PATH", config["profiles_path"])
+    config["cache_path"] = os.environ.get("IZBA_CACHE_PATH", config["cache_path"])
+    config["construction_path"] = os.environ.get("IZBA_CONSTRUCTION_PATH", config["construction_path"])
+    config["images_path"] = os.environ.get("IZBA_IMAGES_PATH", config["images_path"])
     config["overlays_path"] = os.environ.get("IZBA_OVERLAYS_PATH", config["overlays_path"])
 
     # User config has priority here, but should never be used in base library.
@@ -108,14 +132,6 @@ def implicit_base_path():
     return base_path.resolve()
 
 
-def implicit_profiles_path(base_path=(Path('.') / "izba")):
-    return (Path(base_path) / "profiles").resolve()
-
-
-def implicit_overlays_path(base_path=(Path('.') / "izba")):
-    return (Path(base_path) / "overlays").resolve()
-
-
 def resolve_base_path(config=None):
     # Assumes config already loaded.
     if config and "base_path" in config and config["base_path"] is not None:
@@ -124,12 +140,44 @@ def resolve_base_path(config=None):
     return Path(implicit_base_path())
 
 
-def resolve_profiles_path(config=None):
-    # Assumes config already loaded.
-    if config and "profiles_path" in config and config["profiles_path"] is not None:
-        return Path(config["profiles_path"]).resolve()
+def implicit_cache_path(base_path=DEFAULT_WORST_CASE_IZBA_BASE_PATH):
+    return (Path(base_path) / "cache").resolve()
 
-    return Path(implicit_profiles_path(base_path=resolve_base_path(config)))
+
+def resolve_cache_path(config=None):
+    # Assumes config already loaded.
+    if config and "cache_path" in config and config["cache_path"] is not None:
+        return Path(config["cache_path"]).resolve()
+
+    return Path(implicit_cache_path(base_path=resolve_base_path(config)))
+
+
+def implicit_construction_path(base_path=DEFAULT_WORST_CASE_IZBA_BASE_PATH):
+    return (Path(base_path) / "construction").resolve()
+
+
+def resolve_construction_path(config=None):
+    # Assumes config already loaded.
+    if config and "construction_path" in config and config["construction_path"] is not None:
+        return Path(config["construction_path"]).resolve()
+
+    return Path(implicit_construction_path(base_path=resolve_base_path(config)))
+
+
+def implicit_images_path(base_path=DEFAULT_WORST_CASE_IZBA_BASE_PATH):
+    return (Path(base_path) / "images").resolve()
+
+
+def resolve_images_path(config=None):
+    # Assumes config already loaded.
+    if config and "images_path" in config and config["images_path"] is not None:
+        return Path(config["images_path"]).resolve()
+
+    return Path(implicit_images_path(base_path=resolve_base_path(config)))
+
+
+def implicit_overlays_path(base_path=DEFAULT_WORST_CASE_IZBA_BASE_PATH):
+    return (Path(base_path) / "overlays").resolve()
 
 
 def resolve_overlays_path(config=None):

@@ -1,6 +1,12 @@
-"""The full ``qemu-system-*`` command line."""
+#!/usr/bin/env python3
 
 from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
+
+"""The full ``qemu-system-*`` command line."""
 
 import shlex
 from pathlib import Path

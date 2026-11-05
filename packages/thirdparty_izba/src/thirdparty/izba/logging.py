@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 def tail_follow(path, pidfile=None, out=None, poll=0.1, stop=None, idle_timeout=None):
     """Tail `path` to `out`, like `tail -f`.
 

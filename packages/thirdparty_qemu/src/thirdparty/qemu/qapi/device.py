@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 """Guest devices (``-device``).
 
 The typed models cover the virtio devices in common use; :class:`Device` takes any driver
@@ -6,8 +14,6 @@ name plus arbitrary properties as keyword arguments.
 Most virtio devices come in a ``-device`` (virtio-mmio, used by microvm) and a ``-pci``
 flavour; pick with ``driver=``.
 """
-
-from __future__ import annotations
 
 from typing import Annotated, Literal, Union
 

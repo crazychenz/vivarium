@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 def find_free_port(start=2222, end=65535, host="127.0.0.1"):
     """Return the first TCP port >= start that can be bound on host."""
     import socket

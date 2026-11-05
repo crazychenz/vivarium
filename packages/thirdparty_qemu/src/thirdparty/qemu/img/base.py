@@ -1,6 +1,12 @@
+#!/usr/bin/env python3
+
 """Shared plumbing for ``qemu-img`` subcommands."""
 
 from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
 
 import os
 import shlex

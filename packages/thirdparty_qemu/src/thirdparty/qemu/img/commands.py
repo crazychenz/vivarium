@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """``qemu-img`` subcommands.
 
 Field names describe the option; each field's comment gives the flag it renders as. Options
@@ -5,6 +7,10 @@ are those supported by roughly QEMU 6.0 onwards (a few newer ones are noted).
 """
 
 from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
 
 from typing import Literal, Union
 

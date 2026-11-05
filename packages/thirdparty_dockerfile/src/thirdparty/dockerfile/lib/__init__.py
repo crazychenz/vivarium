@@ -7,6 +7,10 @@ python dockerfile_gen.py
 """
 from __future__ import annotations
 
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 import json
 from typing import Annotated, Literal, Union
 

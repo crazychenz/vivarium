@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 """Core rendering for QEMU's ``key=value,key=value`` option syntax (QemuOpts / keyval).
 
 Every option group (``-machine``, ``-netdev``, ``-device``, ...) is a :class:`QemuOpts`
@@ -12,8 +20,6 @@ Rendering rules:
   * nested :class:`QemuOpts` flatten with a dotted prefix (``local.type=unix,local.path=...``).
   * commas inside values are escaped by doubling them, as QEMU expects.
 """
-
-from __future__ import annotations
 
 import enum
 from collections.abc import Iterator

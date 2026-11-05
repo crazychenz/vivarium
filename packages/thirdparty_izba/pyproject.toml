@@ -31,6 +31,6 @@ namespaces = true
 [project.scripts]
 izba = "thirdparty.izba.cli:main"
 
-[project.entry-points."thirdparty_izba_profiles"]
-# Register crt (container runtime) as an izba profile
-crt = "thirdparty.izba.profile.izba.crt:register_profile_crt"
+[project.entry-points."thirdparty_izba_drivers"]
+# Register crt (container runtime) as an izba driver
+crt = "thirdparty.izba.driver.izba.crt:register_driver_crt"

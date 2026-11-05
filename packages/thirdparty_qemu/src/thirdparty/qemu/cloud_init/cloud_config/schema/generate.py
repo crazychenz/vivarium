@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 """Regenerate ../models.py from schema-cloud-config-v1.json (needs datamodel-code-generator)."""
 
 import json

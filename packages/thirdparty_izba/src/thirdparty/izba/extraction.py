@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 def extract_from_disk_image(image, files, dest):
     import shutil
     from pathlib import Path

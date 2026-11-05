@@ -1,9 +1,10 @@
+#!/usr/bin/env python3
 
+import sys
 import logging
 log = logging.getLogger(__name__)
 
 import argparse
-import sys
 import argcomplete
 
 from thirdparty.izba import Izba
@@ -13,7 +14,7 @@ def init_argparse():
     # --- izba
     izba_parser = argparse.ArgumentParser(prog="izba")
     from thirdparty.izba.config import izba_xdg_config_home
-    izba_parser.add_argument("--config", dest="config", action="store", help="path to config.yaml", default=izba_xdg_config_home())
+    izba_parser.add_argument("--config", dest="config", action="store", help="path to config.yaml", default=None)
     izba_parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
     izba_parser.add_argument(
         "--log-level",
@@ -56,9 +57,9 @@ def init_argparse():
     #       [--network=<internet-only|slirp|none>]
     #       [-f] - force recreation
     izba_build_parser = izba_subparsers.add_parser("build")
+    izba_build_parser.add_argument("--driver", default='crt')
+    izba_build_parser.add_argument("-t", "--tags", dest='tags', action="append", default=[])
     izba_build_parser.add_argument("--network", choices=["internet-only", "slirp", "none"], default='none')
-    izba_build_parser.add_argument("-f", dest='force', action="store_true", default=False)
-    izba_build_parser.add_argument("profile")
     izba_build_parser.set_defaults(func=izba_build_func)
 
     # --- izba create [opts] <vm> [<name>]  # provision an instance of vm profile
@@ -68,13 +69,13 @@ def init_argparse():
     izba_create_parser.add_argument("--network", choices=["internet-only", "slirp", "none"], default='none')
     izba_create_parser.add_argument("--user", default='user')
     izba_create_parser.add_argument("-f", dest='force', action="store_true", default=False)
-    izba_create_parser.add_argument("--name", default="default")
-    izba_create_parser.add_argument("profile")
+    izba_create_parser.add_argument("--name", default=None)
+    izba_create_parser.add_argument("image")
     izba_create_parser.set_defaults(func=izba_create_func)
 
     # --- izba rmi [opts] <vm> [<name>]      # remove vm provisioned golden image
     izba_rmi_parser = izba_subparsers.add_parser("rmi")
-    izba_rmi_parser.add_argument("profile")
+    izba_rmi_parser.add_argument("image")
     izba_rmi_parser.set_defaults(func=izba_rmi_func)
 
     # --- izba rm [opts] <vm> [<name>]       # remove vm current image
@@ -108,8 +109,7 @@ def init_argparse():
     izba_run_parser.add_argument("-f", dest='force', action="store_true", default=False)
     izba_run_parser.add_argument("-u", dest='user', default='user')
     izba_run_parser.add_argument("--network", choices=["internet-only", "slirp", "none"], default='none')
-    izba_run_parser.add_argument("--name", default="default")
-    izba_run_parser.add_argument("profile")
+    izba_run_parser.add_argument("--name", default=None)
     izba_run_parser.set_defaults(func=izba_run_func)
     izba_run_parser.usage = (
         izba_run_parser.format_usage()
@@ -159,7 +159,7 @@ def izba_ps_func(args, config):
 
 # List profiles and names with golden images.
 def izba_images_func(args, config):
-    return Izba(config).images()
+    return Izba(config).images(all=args.all)
 
 
 # def izba_inspect_func(args, config):
@@ -168,52 +168,52 @@ def izba_images_func(args, config):
 
 # Build golden image.
 def izba_build_func(args, config):
-    Izba(config, profile=args.profile).build()
+    Izba(config).with_driver(driver=args.driver).build(tags=args.tags)
 
 
 # Remove golden image.
 def izba_rmi_func(args, config):
-    Izba(config, profile=args.profile).rmi()
+    Izba(config).rmi(image=args.image)
 
 
 # If instance image missing, call create()
 def izba_run_func(args, config):
     from thirdparty.izba.subprocess import try_stdin
-    Izba(config, profile=args.profile, overlay_name=args.name)\
+    Izba(config).with_overlay(overlay=args.name)\
     .run(network=args.network, user=args.user, command=args.cmd, stdin=try_stdin())
 
 
 # Copy/adjust golden image into instance image (with qemu-img).
 # If golden image missing, call build().
 def izba_create_func(args, config):
-    Izba(config, profile=args.profile, overlay_name=args.name)\
+    Izba(config).with_image(image=args.image)\
     .create(network=args.network, user=args.user, command=args.cmd)
 
 
 # Remove instance image (and all overlay images).
 # qemu must be shutdown?
 def izba_rm_func(args, config):
-    Izba(config, overlay_name=args.name).rm()
+    Izba(config).with_overlay(overlay=args.name).rm()
 
 
 # If instance image missing, call create()
 def izba_start_func(args, config):
-    Izba(config, overlay_name=args.name).start()
+    Izba(config).with_overlay(overlay=args.name).start()
 
 
 # Run ssh command in VM
 def izba_exec_func(args, config):
     from thirdparty.izba.subprocess import try_stdin
-    Izba(config, overlay_name=args.name).exec(user=args.user, command=args.cmd, stdin=try_stdin())
+    Izba(config).with_overlay(overlay=args.name).exec(user=args.user, command=args.cmd, stdin=try_stdin())
 
 
 def izba_logs_func(args, config):
-    Izba(config, overlay_name=args.name).logs()
+    Izba(config).with_overlay(overlay=args.name).logs()
 
 
 # Kill with pidfile
 def izba_stop_func(args, config):
-    Izba(config, overlay_name=args.name).stop()
+    Izba(config).with_overlay(overlay=args.name).stop()
 
 
 

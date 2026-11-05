@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
-import os
 import sys
+import logging
+log = logging.getLogger(__name__)
+
+import os
 import subprocess
 from pathlib import Path
 from typing import Any

@@ -1,6 +1,10 @@
+#!/usr/bin/env python3
+
+import sys
+import logging
+log = logging.getLogger(__name__)
 
 import os
-import sys
 
 
 # TODO: Make sure this only runs once per run.

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 import sys
+import logging
+log = logging.getLogger(__name__)
+
 import time
 import urllib.request
 from pathlib import Path

@@ -16,11 +16,11 @@ def parse_profile_string(profile_value, def_profile_inst='default'):
 class Rig():
 
     def __init__(self, config):
-        from thirdparty.vivarium.config import resolve_base_path, resolve_rigs_path
+        import thirdparty.vivarium.config as cfg
 
         self.config = config
-        self.base_path = resolve_base_path(config)
-        self.rigs_path = resolve_rigs_path(config)
+        self.base_path = cfg.resolve_base_path(config)
+        self.rigs_path = cfg.resolve_rigs_path(config)
 
         self._with_profile = False
 

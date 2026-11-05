@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 from importlib.metadata import entry_points
 from typing import Any
 

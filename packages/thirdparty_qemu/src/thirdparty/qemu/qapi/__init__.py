@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 """Pydantic models for building QEMU command lines.
 
 Example::

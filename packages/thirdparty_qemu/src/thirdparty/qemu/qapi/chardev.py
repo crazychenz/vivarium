@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 """Character device backends.
 
 Each backend renders two ways:
@@ -7,8 +15,6 @@ Each backend renders two ways:
 
 To point ``-serial``/``-qmp`` at a ``-chardev`` declared separately, use :class:`ChardevRef`.
 """
-
-from __future__ import annotations
 
 from pathlib import Path
 from typing import Annotated, Literal, Union

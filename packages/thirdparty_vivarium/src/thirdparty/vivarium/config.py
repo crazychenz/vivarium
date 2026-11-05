@@ -1,9 +1,11 @@
+#!/usr/bin/env python3
+
+import sys
 import logging
 log = logging.getLogger(__name__)
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 

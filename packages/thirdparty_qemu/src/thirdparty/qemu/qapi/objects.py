@@ -1,6 +1,13 @@
-"""QOM objects (``-object``)."""
+
+#!/usr/bin/env python3
 
 from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
+
+"""QOM objects (``-object``)."""
 
 from pathlib import Path
 from typing import Annotated, Literal, Union

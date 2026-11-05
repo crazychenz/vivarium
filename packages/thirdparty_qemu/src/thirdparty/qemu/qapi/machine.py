@@ -1,6 +1,12 @@
-"""Machine, CPU, memory and other system-wide option groups."""
+#!/usr/bin/env python3
 
 from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
+
+"""Machine, CPU, memory and other system-wide option groups."""
 
 from typing import Literal
 

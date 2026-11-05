@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 """Pydantic models for cloud-init ``#cloud-config`` user-data.
 
 ``lib.py`` is generated from ``schema/schema-cloud-config-v1.json`` by

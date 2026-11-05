@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 def generate_ssh_keys(dest, comment='user@host'):
     from pathlib import Path
     from cryptography.hazmat.primitives import serialization

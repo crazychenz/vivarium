@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 def simple_tty_ssh_run(
     destination="user@127.0.0.1",
     port=2222,

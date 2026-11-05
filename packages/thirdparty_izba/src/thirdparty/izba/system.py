@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # Developed and iterated on with LLM: "Audie"
 """
 report what the current account can do with podman and
@@ -22,6 +23,10 @@ Requires Python 3.8+.
 """
 
 from __future__ import annotations
+
+import sys
+import logging
+log = logging.getLogger(__name__)
 
 import argparse
 import dataclasses

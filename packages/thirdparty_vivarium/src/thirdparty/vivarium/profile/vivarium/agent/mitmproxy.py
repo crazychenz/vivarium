@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import sys
+import logging
+log = logging.getLogger(__name__)
+
 from pathlib import Path
 
 def generate_mitmproxy_certs(base_name = "mitmproxy", confdir="~/.mitmproxy", key_size=2048, force=False, days=3650) -> int:
