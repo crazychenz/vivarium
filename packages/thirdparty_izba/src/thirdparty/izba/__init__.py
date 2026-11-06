@@ -152,9 +152,18 @@ class Izba():
 
         # TODO: Replace following with list of _running_ overlays.
 
+        from thirdparty.izba.driver import get_izba_driver_eps
+        driver_index = get_izba_driver_eps()
+
         for entry in self.overlays_path.iterdir():
             if entry.is_dir():
-                print(entry.name)
+                if all:
+                    print(entry.name)
+                else:
+                    driver_name = (entry / "driver").read_text().strip()
+                    driver = driver_index.create(driver_name)
+                    if driver.izba_is_running(self, entry):
+                        print(entry.name)
 
         # from thirdparty.izba.subprocess.qemu import scan_qemu_pidfiles
         # summary = scan_qemu_pidfiles(self.profiles_inst_path, "instance.pid")
@@ -235,15 +244,15 @@ class Izba():
         (self.build_path / "driver").write_text(self.driver_name)
 
         # Download the OS, kernel, and initrd
-        self.driver.cache_izba_base(self)
+        self.driver.cache_izba_base(self, **opts)
         # Build data that could be used by init process
-        self.driver.build_izba_data(self)
+        self.driver.build_izba_data(self, **opts)
         # Build configuration and init process
-        self.driver.build_izba_init(self)
+        self.driver.build_izba_init(self, **opts)
         # Build the bundle exposed to app (w/ init process and data)
-        self.driver.build_izba_bundle(self)
+        self.driver.build_izba_bundle(self, **opts)
         # Initialize the izba
-        self.driver.build_izba(self)
+        self.driver.build_izba(self, **opts)
 
         # Move build_path to images / by_id
         if self.image_path.exists():

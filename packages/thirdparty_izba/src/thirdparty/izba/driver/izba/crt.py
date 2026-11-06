@@ -31,7 +31,7 @@ from pathlib import Path
 # Written in an overlay folder once it has been resumed from origin-overlay.state.
 ORIGIN_RESUMED_MARKER = Path("run") / "origin-state-resumed" 
 
-
+from thirdparty.izba.driver import DriverIndex
 def register_driver_crt(driver_index: DriverIndex):
     driver_index.register_driver_class('crt', IzbaCrtDriver)
 
@@ -71,7 +71,7 @@ class IzbaCrtDriver():
 
     # Download the base image we'll base golden and instance images from.
     # Depends on cached target, internet, or available mirror.
-    def cache_izba_base(self, izba):
+    def cache_izba_base(self, izba, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         # TODO: Make this more generic.
@@ -91,7 +91,7 @@ class IzbaCrtDriver():
         return True
 
 
-    def build_izba_data(self, izba):
+    def build_izba_data(self, izba, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         from thirdparty.izba.keys import generate_ssh_keys
@@ -101,7 +101,7 @@ class IzbaCrtDriver():
         # shutil.copytree(izba.gold_path / "keys", izba.gold_path / "import", dirs_exist_ok=True)
 
 
-    def build_izba_init(self, izba):
+    def build_izba_init(self, izba, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         self.cloud_init_user_data = self._build_base_cloud_config(izba, reboot=self.firstboot_reboot)
@@ -149,7 +149,7 @@ class IzbaCrtDriver():
         return True
 
 
-    def build_izba_bundle(self, izba):
+    def build_izba_bundle(self, izba, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         from thirdparty.qemu.cloud_init import make_seed
@@ -174,7 +174,7 @@ class IzbaCrtDriver():
 
 
 
-    def _qemu_build_base_image(self, izba):
+    def _qemu_build_base_image(self, izba, qemu_cmd_cb=None):
         kernel_cmdline = ' '.join([
             f"root=LABEL=cloudimg-rootfs",
             "rw",
@@ -243,6 +243,9 @@ class IzbaCrtDriver():
                 devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
             )
 
+            if qemu_cmd_cb:
+                qemu_cmd_cb(self, izba, qemu_cmd_obj)
+
             log.debug(f"base-image qemu command: {qemu_cmd_obj.to_shell()}")
 
             qemu_build_base_image_command_fpath = izba.build_path / "artifacts" / "qemu_build_base_image.sh"
@@ -288,7 +291,7 @@ class IzbaCrtDriver():
         return True
 
 
-    def _qemu_init_origin_overlay(self, izba):
+    def _qemu_init_origin_overlay(self, izba, qemu_cmd_cb=None):
         ### Do first boot of origin-overlay
 
         print("Doing inital boot of origin overlay.")
@@ -381,6 +384,9 @@ class IzbaCrtDriver():
                        "qio_channel_file*"],
             )
 
+            if qemu_cmd_cb:
+                qemu_cmd_cb(self, izba, qemu_cmd_obj)
+
             log.debug(f"origin-overlay qemu command: {qemu_cmd_obj.to_shell()}")
             qemu_init_origin_overlay_command_fpath = izba.build_path / "artifacts" / "qemu_init_origin_overlay.sh"
             qemu_init_origin_overlay_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd_obj.to_shell()}")
@@ -466,12 +472,12 @@ class IzbaCrtDriver():
 
     # Runs the VM and shuts down when complete.
     # Depends on: prepare_golden(), build_seed_image()
-    def build_izba(self, izba, **opts):
+    def build_izba(self, izba, callbacks={}, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        self._qemu_build_base_image(izba)
+        self._qemu_build_base_image(izba, qemu_cmd_cb=callbacks.get('build_izba_base_qemu_cmd_cb', None))
         self._create_origin_overlay(izba)
-        self._qemu_init_origin_overlay(izba)
+        self._qemu_init_origin_overlay(izba, qemu_cmd_cb=callbacks.get('build_izba_origin_qemu_cmd_cb', None))
 
         # Rebase the backing image of origin-overlay in preparationg of move
         # from construction to images.
@@ -502,7 +508,7 @@ class IzbaCrtDriver():
 
     # Copy/adjust the golden to the instance
     # Depends on: build_golden(self)
-    def create_izba_overlay(self, izba):
+    def create_izba_overlay(self, izba, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         import shutil
@@ -549,7 +555,7 @@ class IzbaCrtDriver():
     # Starts the VM and leaves running until kill or stop.
     # Resumes the RAM/device state saved in images/origin-overlay.state (see
     # build_base_disk_image) on top of a fresh overlay disk created by Izba.create().
-    def start_izba(self, izba, console='stdout', exist_ok=False, **opts):
+    def start_izba(self, izba, console='stdout', exist_ok=False, callbacks={}, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         import subprocess
@@ -653,6 +659,12 @@ class IzbaCrtDriver():
                 incoming=f"file:{state_fpath}",
                 msg_timestamp=True,
             )
+
+            qemu_cmd_cb = callbacks.get('start_izba_qemu_cmd_cb', None)
+            if qemu_cmd_cb:
+                qemu_cmd_cb(self, izba, qemu_cmd_obj)
+
+
             log.debug(f"instance qemu command: {qemu_cmd_obj.to_shell()}")
             # TODO: Consider artifacts folder in overlay folder?
             start_instance_vm_command_fpath = izba.overlay_path / "logs" / "start_instance_vm.sh"
@@ -710,6 +722,16 @@ class IzbaCrtDriver():
         #         tail_follow(log_fpath, pidfile_fpath)
 
         return True
+
+
+    def izba_is_running(self, izba, overlay_path):
+        from thirdparty.izba.subprocess import is_alive, read_pid
+        from thirdparty.izba.subprocess.qemu import is_qemu_process
+        pidfile_fpath = overlay_path / "run" / "qemu.pid"
+        pid = read_pid(pidfile_fpath)
+        if pid and is_alive(pid) and is_qemu_process(pid):
+            return True
+        return False
 
 
     # Stops the VM.

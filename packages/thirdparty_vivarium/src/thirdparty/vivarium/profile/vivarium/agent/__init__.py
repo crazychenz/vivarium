@@ -41,36 +41,10 @@ class VivAgentProfile():
         # from thirdparty.vivarium.profile.vivarium.agent.mitmproxy import generate_mitmproxy_certs
         # generate_mitmproxy_certs(confdir=self.mitm_path)
 
-        # --- TODO: izba agent container image with crt ---
+        from thirdparty.vivarium.profile.vivarium.agent.oci import AgentOciBuilder
+        agent_oci_builder = AgentOciBuilder(self)
+        agent_oci_builder.build_agent_oci_image()
 
-        # TODO: How do we set the izba config file as a viv profile configuration?
-        from thirdparty.izba.config import load_izba_config
-        izba_config = load_izba_config()
-
-        import io
-        from thirdparty.izba import Izba
-        driver_name='crt'
-        image_name='crt'
-        overlay_name='crt'
-
-        crt_izba = Izba(izba_config)
-        crt_izba.with_driver(driver=driver_name)
-        crt_izba.build(tags=[image_name], exist_ok=True)
-        crt_izba.with_image(image=image_name)
-        crt_izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
-        crt_izba.with_overlay(overlay_name)
-        crt_izba.start(exist_ok=True)
-
-        agent_dockerfile_bytes = io.BytesIO(_build_agent_dockerfile().render().encode("utf-8"))
-        crt_izba.exec(user='user', command=['docker', 'build', '-f', '-', '.'], stdin=agent_dockerfile_bytes)
-
-        # Create sparse file with:
-        # -------------------------------
-        # SIZE_8_GIB = 8 << 30
-        # out_raw = self.path / "out.raw"
-        # out_raw.unlink(missing_ok=True)
-        # with open(out_raw, "wb") as f:
-        #     f.truncate(SIZE_8_GIB)
 
         # Run qemu with:
         # ----------------
@@ -141,31 +115,34 @@ class VivAgentProfile():
 
         # TODO: izba agent VM with VivAgentIzbaProfile profile
         # TODO: Put the container image in the seed for install.
-        driver_name='vivarium.agent'
-        image_name='agent'
-        overlay_name='agent'
-        agent_izba = Izba(izba_config)
-        agent_izba.with_driver(driver=driver_name)
-        agent_izba.build(tags=[image_name], exist_ok=True)
-        agent_izba.with_image(image=image_name)
-        agent_izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
-        agent_izba.with_overlay(overlay_name)
-        agent_izba.start(exist_ok=True)
-        agent_izba.exec(user='user', command=['cat', '/etc/passwd']) #, stdin=try_stdin())
+        # driver_name='vivarium.agent'
+        # image_name='agent'
+        # overlay_name='agent'
+        # agent_izba = Izba(izba_config)
+        # agent_izba.with_driver(driver=driver_name)
+        # agent_izba.build(tags=[image_name], exist_ok=True)
+        # agent_izba.with_image(image=image_name)
+        # agent_izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
+        # agent_izba.with_overlay(overlay_name)
+        # agent_izba.start(exist_ok=True)
+
+        # TODO: Consider: ssh user@remote 'podman run --rm "$(podman load -q | sed "s/^Loaded image[s]*: //")"' < image.tar
+
+        # agent_izba.exec(user='user', command=['cat', '/etc/passwd']) #, stdin=try_stdin())
 
         # TODO: izba enclosure VM with VivEnclosureIzbaProfile profile
         # TODO: Put the container image in the seed for install.
-        driver_name='vivarium.enclosure'
-        image_name='agent'
-        overlay_name='agent'
-        enclosure_izba = Izba(izba_config)
-        enclosure_izba.with_driver(driver=driver_name)
-        enclosure_izba.build(tags=[image_name], exist_ok=True)
-        enclosure_izba.with_image(image=image_name)
-        enclosure_izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
-        enclosure_izba.with_overlay(overlay_name)
-        enclosure_izba.start(exist_ok=True)
-        enclosure_izba.exec(user='user', command=['cat', '/etc/passwd']) #, stdin=try_stdin())
+        # driver_name='vivarium.enclosure'
+        # image_name='agent'
+        # overlay_name='agent'
+        # enclosure_izba = Izba(izba_config)
+        # enclosure_izba.with_driver(driver=driver_name)
+        # enclosure_izba.build(tags=[image_name], exist_ok=True)
+        # enclosure_izba.with_image(image=image_name)
+        # enclosure_izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
+        # enclosure_izba.with_overlay(overlay_name)
+        # enclosure_izba.start(exist_ok=True)
+        # enclosure_izba.exec(user='user', command=['cat', '/etc/passwd']) #, stdin=try_stdin())
 
 
     def run(self, **opts):
@@ -215,79 +192,3 @@ class VivAgentProfile():
         # TODO: - virtfsio size
 
 
-def _build_agent_dockerfile():
-    # create dockerfile in code
-    from pathlib import Path
-    import thirdparty.dockerfile.lib as df
-
-    apt_installs = df.AptInstall('ca-certificates')
-
-    instructions = [apt_installs]
-
-    # Build last: pydantic copies the list passed to Stage(instructions=...), so
-    # extending `instructions` after construction would not reach the stage.
-    dockerfile = df.Dockerfile(
-        stages=[
-            df.Stage(image="node", tag="22-slim", name="builder", instructions=instructions),
-        ],
-    )
-
-    apt_installs.add_pkg([
-        'bash',
-        'wireguard-tools',
-        'iproute2',
-        'ca-certificates',
-        'curl',
-        'util-linux'
-    ])
-
-    instructions.extend([
-        df.Run(commands=['npm install -g @anthropic-ai/claude-code && npm cache clean --force']),
-        "# Policy the agent cannot override (managed settings win over user/project settings).",
-        #df.Copy(sources=["managed-settings.json"], dest="/etc/claude-code/managed-settings.json"),
-        df.Run(commands=[
-            #"chmod 0755 /usr/local/bin/agent-entrypoint",
-            #"chmod 0444 /etc/claude-code/managed-settings.json",
-            "mkdir -p /workspace",
-            "chown root:root /workspace"
-        ]),
-    ])
-
-    instructions.extend([
-        df.CopyHeredoc(
-            quoted=True,
-            fpath="/usr/local/share/ca-certificates/mitmproxy.crt",
-            flags="--chmod=644",
-            script=open(Path.home() / '.mitmproxy' / 'mitmproxy-ca-cert.pem').read(),
-        ),
-        df.Run(commands=["update-ca-certificates"]),
-        "# Note: Node doesn't read from system certs.",
-        df.Env(vars={"NODE_EXTRA_CA_CERTS": "/usr/local/share/ca-certificates/mitmproxy.crt"}),
-    ])
-
-    # dockerfile.extend([
-    #     COPY("claude-entrypoint.sh /usr/local/bin/entrypoint"),
-    #     ENTRYPOINT('["/usr/local/bin/agent-entrypoint"]'),
-    # ])
-
-    instructions.extend([
-        df.CopyHeredoc(
-            quoted=True,
-            fpath='/usr/local/bin/entrypoint.sh',
-            flags="--chmod=755",
-            script="sad\nqwe\nzxc",
-            #open('context/wg-entrypoint.sh').read()),
-        ),
-        #COPY("wg-entrypoint.sh /usr/local/bin/entrypoint"),
-        df.Entrypoint(args=["/usr/local/bin/entrypoint.sh"]),
-    ])
-
-    instructions.extend([
-        #"# /workspace mirrors the path the tools operate on, so the working directory that",
-        #"# Claude Code reports about itself is the same one the tools actually use.",
-        df.Workdir(path="/workspace"),
-        df.User(user="node"),
-        df.Env(vars={"HOME": "/home/node"}),
-    ])
-
-    return dockerfile
