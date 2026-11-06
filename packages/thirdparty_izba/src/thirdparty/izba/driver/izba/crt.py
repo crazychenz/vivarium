@@ -855,6 +855,16 @@ class IzbaCrtDriver():
             #                 permissions="0755"),
             #     cc.WriteFile(path="/etc/containers/registries.conf.d/00-crt.conf",
             #                 content=REGISTRIES_CONF, permissions="0644"),
+                # cc.WriteFile(
+                #     path='/etc/subuid',
+                #     content='alpine:100000:65536\n',
+                #     append=True,
+                # ),
+                # cc.WriteFile(
+                #     path='/etc/subgid',
+                #     content='alpine:100000:65536\n',
+                #     append=True,
+                # ),
             # ],
             apt=cc.Apt(
                 sources={
