@@ -11,7 +11,7 @@ apt-get install -y --no-install-recommends \
     ninja-build pkg-config cmake \
     autoconf automake libtool libltdl-dev gettext \
     python3 python3-pip python3-venv dpkg-dev \
-    flex bison bzip2 xz-utils curl ca-certificates
+    flex bison gperf bzip2 xz-utils curl ca-certificates
 rm -rf /var/lib/apt/lists/*
 
 # musl-gcc only searches /usr/include/x86_64-linux-musl: expose the kernel headers there.

@@ -23,7 +23,7 @@ if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
 fi
 apt-get update -qq
 (cd "$SRCDIR" && apt-get source -q --download-only \
-    zlib pixman glib2.0 libslirp pcre2 libffi ncurses bzip2 lzo2 device-tree-compiler) \
+    zlib pixman glib2.0 libslirp pcre2 libffi ncurses bzip2 lzo2 device-tree-compiler libseccomp) \
     || true   # the harmless "unsandboxed" warning makes apt return non-zero in some images
 
 unpack() {   # unpack <name-prefix>  -> prints the extracted dir
@@ -120,6 +120,12 @@ b_lzo2() {
     make -j"$JOBS" && make install
 }
 
+b_libseccomp() {
+    cd "$(unpack libseccomp)"
+    ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-python
+    make -j"$JOBS" && make install
+}
+
 run zlib b_zlib
 run pcre2 b_pcre2
 run libffi b_libffi
@@ -130,6 +136,7 @@ run libslirp b_libslirp
 run ncurses b_ncurses
 run bzip2 b_bzip2
 run lzo2 b_lzo2
+run libseccomp b_libseccomp
 
 echo; echo "=================== all dependencies built ==================="
 ls "$PREFIX/lib"/*.a

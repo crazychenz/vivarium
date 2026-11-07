@@ -29,7 +29,7 @@ cd "$BUILD"
     --disable-download \
     --disable-docs --disable-user --disable-werror --enable-guest-agent \
     --disable-gtk --disable-sdl --disable-opengl --disable-gio \
-    --enable-slirp --enable-curses --enable-bzip2 --enable-lzo \
+    --enable-slirp --enable-curses --enable-bzip2 --enable-lzo --enable-seccomp \
     --disable-gnutls --disable-nettle --disable-gcrypt \
     --disable-libssh --disable-curl --disable-rbd --disable-libnfs \
     --disable-snappy \
@@ -59,6 +59,12 @@ done
 ./qemu-system-x86_64 -machine help | grep -q '^microvm ' \
     || { echo "ERROR: microvm machine not available" >&2; exit 1; }
 echo "OK: microvm machine type present"
+
+# Actually installs the seccomp filter, then quits over QMP.
+printf '%s\n' '{"execute":"qmp_capabilities"}' '{"execute":"quit"}' \
+    | ./qemu-system-x86_64 -M none -nodefaults -display none -sandbox on -qmp stdio >/dev/null \
+    || { echo "ERROR: -sandbox on does not work" >&2; exit 1; }
+echo "OK: -sandbox on works"
 
 # Layout: $OUT/bin/<binaries> and $OUT/share/qemu/<firmware>. QEMU looks for its
 # firmware in <binary dir>/../share/qemu, so no -L option is needed at run time.
