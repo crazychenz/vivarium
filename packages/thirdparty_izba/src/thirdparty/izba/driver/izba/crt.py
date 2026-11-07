@@ -571,15 +571,14 @@ class IzbaCrtDriver():
 
         # TODO: Make overlay-X dynamic
         if not izba.overlay_path.exists():
-            print(f"Overlay for overlay {izba.overlay_name} not built. Run build first.")
+            raise FileNotFoundError(f"Overlay for overlay {izba.overlay_name} not built. Run build first.")
             return False
 
         # Note: image_images_path <- IZBA_BASE_PATH/images/by_id/IMAGE_ID/images
         image_images_path = izba.image_path / "images"
         state_fpath = image_images_path / "origin-overlay.state"
         if not state_fpath.exists():
-            print(f"No saved VM state at {state_fpath}. Run build first.")
-            return False
+            raise FileNotFoundError(f"No saved VM state at {state_fpath}. Run build first.")
 
         kernel_cmdline = ' '.join([
             f"root=LABEL=cloudimg-rootfs",
@@ -624,12 +623,14 @@ class IzbaCrtDriver():
         if pid is not None and is_alive(pid):
             if exist_ok:
                 return True
-            raise Exception(f"{izba.overlay_name} is already running (pid {pid}). Run stop first.")
+            raise FileExistsError(f"{izba.overlay_name} is already running (pid {pid}). Run stop first.")
         pidfile_fpath.unlink(missing_ok=True)
 
         # Paths outside the overlay are absolute; QEMU runs from the overlay folder.
         with workdir(izba.overlay_path):
 
+            import os
+            print(os.getcwd())
             import thirdparty.qemu.qapi as qapi
             qemu_cmd_obj = qapi.QemuCommand(
                 # --- common ---
@@ -673,7 +674,7 @@ class IzbaCrtDriver():
 
             log.debug(f"instance qemu command: {qemu_cmd_obj.to_shell()}")
             # TODO: Consider artifacts folder in overlay folder?
-            start_instance_vm_command_fpath = izba.overlay_path / "logs" / "start_instance_vm.sh"
+            start_instance_vm_command_fpath = izba.overlay_path / "artifacts" / "start_instance_vm.sh"
             start_instance_vm_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd_obj.to_shell()}")
 
             #* Daemonized qemu causes this to return quickly.
@@ -803,11 +804,8 @@ class IzbaCrtDriver():
                 stdin=stdin if stdin is not None else sys.stdin,
             )
             return True
-        else:
-            print(f"Overlay {izba.overlay_name} is not running")
-            return False
-        
-        return False
+
+        raise FileNotFoundError(f"Overlay {izba.overlay_name} is not running")
 
 
     def run_ready_wait(self, izba):

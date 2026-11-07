@@ -28,11 +28,11 @@ class AgentOciBuilder():
 
         def inject_sparse_device(is_overlay=False):
             def _inject_sparse_device(driver, izba, qemu_cmd_obj):
-                from thirdparty.izba.io import make_file_sparse
                 if is_overlay:
                     oci_tar_fpath = izba.overlay_path / "images" / "oci.tar"
                 else:
                     oci_tar_fpath = izba.build_path / "images" / "oci.tar"
+                from thirdparty.izba.io import make_file_sparse
                 make_file_sparse(oci_tar_fpath)
 
                 import thirdparty.qemu.qapi as qapi
@@ -57,11 +57,18 @@ class AgentOciBuilder():
             'build_izba_init_cloud_config_cb': inject_user_disk_permission,
         }
 
-        crt_izba.build(tags=[image_name], exist_ok=True, callbacks=callbacks)
-        crt_izba.with_image(image=image_name)
-        crt_izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
-        crt_izba.with_overlay(overlay_name)
-        crt_izba.start(exist_ok=True, callbacks=callbacks)
+        try:
+            crt_izba.build(tags=[image_name], exist_ok=True, callbacks=callbacks)
+            crt_izba.with_image(image=image_name)
+            crt_izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
+            crt_izba.with_overlay(overlay_name)
+            crt_izba.start(exist_ok=True, callbacks=callbacks)
+        except FileExistsError:
+            print("HERE")
+            pass
+        except:
+            print("THERE")
+            raise
 
         # Build the container image.
         agent_dockerfile_bytes = io.BytesIO(_build_agent_dockerfile().render().encode("utf-8"))
@@ -74,41 +81,9 @@ class AgentOciBuilder():
 
         # Copy real tarfile from sparse file and wipe sparse file
         sparse_fpath = crt_izba.overlay_path / "images" / "oci.tar"
+        from thirdparty.izba.io import make_file_sparse, copy_tar_from_sparse_file
         copy_tar_from_sparse_file(sparse_fpath, dest_oci_fpath)
         make_file_sparse(sparse_fpath)
-
-
-def copy_tar_from_sparse_file(sparse_fpath, dest_fpath):
-    import shutil
-    import tarfile
-
-    def tar_end_offset(path) -> int:
-        import tarfile
-        with tarfile.open(path, "r:") as tar:
-            for _ in tar:
-                pass
-            return tar.offset + 2 * tarfile.BLOCKSIZE   # end-of-archive marker
-
-    if not sparse_fpath.exists():
-        raise Exception(f"Sparse tarfile {sparse_fpath} does not exist.")
-
-    # TODO: Do sanity checks.
-    # try:
-    #     with tarfile.open(sparse_fpath, "r:") as tar:
-    #         names = tar.getnames()
-    # except tarfile.ReadError as e:
-    #     raise RuntimeError(f"build produced no image ({e}), see {self.path / 'logs' / 'console.log'}")
-
-    # # docker-archive writes manifest.json last, so it only exists if the save completed.
-    # # (An untouched, all-zero disk opens fine as an empty tar and also lands here.)
-    # if "manifest.json" not in names:
-    #     raise RuntimeError(f"no complete image on out.raw, see {self.path / 'logs' / 'console.log'}")
-
-    with open(sparse_fpath, "r+b") as f:
-        f.truncate(tar_end_offset(sparse_fpath))
-
-    dest_fpath.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(sparse_fpath, dest_fpath)
 
 
 def _build_agent_dockerfile():

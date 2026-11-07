@@ -21,7 +21,7 @@ def try_stdin():
 
 
 from pathlib import Path
-def run_background_process_logged(pidfile: Path | str, *args: str, log_file: Path | str | None = None) -> int:
+def run_background_process_logged(pidfile: Path | str, args: list, log_file: Path | str | None = None) -> int:
     """
     Start process in the background and write its pid to `pidfile`.
 
@@ -41,7 +41,7 @@ def run_background_process_logged(pidfile: Path | str, *args: str, log_file: Pat
         stderr = subprocess.DEVNULL
 
     proc = subprocess.Popen(
-        [*args],
+        args,
         stdout=stdout,
         stderr=stderr,
         stdin=subprocess.DEVNULL,

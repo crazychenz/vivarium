@@ -32,6 +32,10 @@ class VivAgentProfile():
         self.mitm = MitmProxy(self.rig)
 
         from thirdparty.vivarium.profile.vivarium.agent.wgbridge import WireguardBridge
+        self.wgbridge = WireguardBridge(self.rig)
+        
+        from thirdparty.vivarium.profile.vivarium.agent.agentvm import AgentVm
+        self.agentvm = AgentVm(self)
 
         for folder in ['mcpg', 'enclosure', 'agent']:
             (rig.rig_path / folder).mkdir(parents=True, exist_ok=True)
@@ -52,28 +56,21 @@ class VivAgentProfile():
         self.mitm.generate_mitmproxy_config()
 
         # Build the agent OCI with izba.
-        from thirdparty.vivarium.profile.vivarium.agent.oci import AgentOciBuilder
-        agent_oci_builder = AgentOciBuilder(self)
-        agent_oci_builder.build_agent_oci_image(self.agent_path / "agent-oci.tar")
+        agent_oci_fpath = self.agent_path / "agent-oci.tar"
+        # TODO: Allow to forcefully rebuild
+        if not agent_oci_fpath.exists():
+            from thirdparty.vivarium.profile.vivarium.agent.oci import AgentOciBuilder
+            agent_oci_builder = AgentOciBuilder(self)
+            agent_oci_builder.build_agent_oci_image(self.agent_path / "agent-oci.tar")
 
         # Optionally clean up.
         # ----------------------
         # izba.stop()
         # izba.rm(force=True)
 
-
         # TODO: izba agent VM with VivAgentIzbaProfile profile
         # TODO: Put the container image in the seed for install.
-        # driver_name='vivarium.agent'
-        # image_name='agent'
-        # overlay_name='agent'
-        # agent_izba = Izba(izba_config)
-        # agent_izba.with_driver(driver=driver_name)
-        # agent_izba.build(tags=[image_name], exist_ok=True)
-        # agent_izba.with_image(image=image_name)
-        # agent_izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
-        # agent_izba.with_overlay(overlay_name)
-        # agent_izba.start(exist_ok=True)
+        self.agentvm.build_vm()
 
         # TODO: Consider: ssh user@remote 'podman run --rm "$(podman load -q | sed "s/^Loaded image[s]*: //")"' < image.tar
 
@@ -99,10 +96,32 @@ class VivAgentProfile():
         if not self.rig._with_profile:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
 
-        start_
-        start_mitmproxy(self.mitm_path / "mitmdump.pid")
+        if not self.mitm.is_alive(): # ! checking for prefix mitmdump does not work.
+            # TODO: Include Addons
+            self.mitm.start(args=[
+                '--set', f'confdir={str(self.mitm.config_fpath.parent)}',
+                '--mode', f'wireguard:{str(self.mitm.config_fpath.parent / "wireguard.conf")}@127.0.0.1:51820',
+            ])
+        else:
+            log.info(f"mitmproxy already running")
 
-        # TODO: run vm wireguard bridge
+        if not self.wgbridge.is_alive():
+            self.wgbridge.start(args=[
+                "-socket", str(self.wgbridge.path / "run" / "bridge.sock"),
+                # TODO: Use the real overlay_path from izba object
+                "-peer", str(self.wgbridge.path / "run" / "qemu.sock"),
+                "-conf", str(self.mitm.config_fpath.parent / "wireguard.conf"),
+                "-endpoint", "127.0.0.1:51820",
+                "-guest-ip", "10.0.0.1",
+                "-mtu", "1420",
+            ])
+        else:
+            log.info(f"qemu-wg-bridge already running")
+
+        self.agentvm.start_vm()
+  
+
+        
         # TODO: run mitm (with addons)
         # TODO: run mcpg (with tools configured)
         # TODO: run virtiofsd (implicit as part of izba?)

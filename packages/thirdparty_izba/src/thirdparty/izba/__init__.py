@@ -8,6 +8,11 @@ def version():
     return [0, 0, 0, 0]
 
 
+
+# FileExistsError - Izba related resource already running. Usually pass-able.
+# FileNotFoundError - Izba related resource missing. Usually raise-able.
+
+
 class Izba():
     def __init__(self, config):
         
@@ -30,7 +35,7 @@ class Izba():
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         if self._with_overlay is True:
-            raise Exception("Use with_driver() before with_overlay().")
+            raise RuntimeError("Use with_driver() before with_overlay().")
 
         from thirdparty.izba.driver import get_izba_driver_eps
         driver_index = get_izba_driver_eps()
@@ -60,7 +65,7 @@ class Izba():
             if entry.is_dir() and entry.name.startswith(encoded_alias):
                 if imageid is not None:
                     # Ambiguous name
-                    raise Exception("Ambiguous image alias, please be more specific.")
+                    raise ValueError("Ambiguous image alias, please be more specific.")
 
                 # TODO: Consider checking if link exists.
                 imageid = uuid.UUID(entry.resolve().name)
@@ -71,7 +76,7 @@ class Izba():
             if entry.is_dir() and entry.name.startswith(encoded_alias):
                 if imageid is not None:
                     # Ambiguous name
-                    raise Exception("Ambiguous image alias, please be more specific.")
+                    raise ValueError("Ambiguous image alias, please be more specific.")
 
                 imageid = uuid.UUID(entry.resolve().name)
                 image_path = by_id_path / imageid.hex
@@ -85,7 +90,7 @@ class Izba():
         self.imageid, self.image_path, self.image_name = self._resolve_image_alias(image)
         
         if self.imageid is None:
-            raise Exception("No matching image found.")
+            raise FileNotFoundError("No matching image found.")
 
         from thirdparty.izba.driver import get_izba_driver_eps
         driver_index = get_izba_driver_eps()
@@ -103,7 +108,7 @@ class Izba():
         self.overlay_name = overlay
         self.overlay_path = self.overlays_path / self.overlay_name
         if not self.overlay_path.exists():
-            raise Exception(f"Overlay {overlay} does not exist. Run create or run first.")
+            raise FileNotFoundError(f"Overlay {overlay} does not exist. Run create or run first.")
 
         if self.driver is None:
             # We want to infer driver from "driver" file.
@@ -220,7 +225,7 @@ class Izba():
         '''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self._with_driver:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_driver().")
+            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_driver().")
 
         # TODO: Forbid all tags that look like uuid7.hex
 
@@ -229,7 +234,7 @@ class Izba():
             if tag_path.exists():
                 if exist_ok:
                     return True
-                raise Exception(f"Tag {tag} already used. Run rmi first.")
+                raise FileExistsError(f"Tag {tag} already used. Run rmi first.")
 
         from thirdparty.izba.uuid import uuid7
         self.imageid = uuid7()
@@ -257,7 +262,7 @@ class Izba():
 
         # Move build_path to images / by_id
         if self.image_path.exists():
-            raise Exception(f"Image path {self.image_path} already exists.")
+            raise FileExistsError(f"Image path {self.image_path} already exists.")
         self.build_path.rename(self.image_path)
 
         if tags:
@@ -279,7 +284,7 @@ class Izba():
         '''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self._with_image:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_image().")
+            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_image().")
 
         from thirdparty.izba.path import generate_overlay_path, image_name_encode
         if name is None:
@@ -291,7 +296,7 @@ class Izba():
             if self.overlay_path.exists():
                 if exist_ok:
                     return True
-                raise Exception(f"Overlay {name} already exists. Run rm first.")
+                raise FileExistsError(f"Overlay {name} already exists. Run rm first.")
             self.overlay_name = self.overlay_path.name
 
         # Create standard folders for build path
@@ -330,7 +335,7 @@ class Izba():
             db[(entry / "base").resolve().name].append(entry)
 
         if self.imageid is None:
-            raise Exception("No matching image found.")
+            raise FileNotFoundError("No matching image found.")
 
         # TODO: This is kind of a mess...
         if self.image_name:
@@ -354,13 +359,13 @@ class Izba():
         
             # with name, we expect to-be hanging images to have 1 reference
             if len(db[self.imageid.hex]) > 1:
-                raise Exception("Image used by overlay or image.")
+                raise ValueError("Image used by overlay or image.")
             shutil.rmtree(self.image_path)
             return True
         
         # no name means only zero refs to image is ok to remove
         if len(db[self.imageid.hex]) > 0:
-            raise Exception("Image used by overlay or image.")
+            raise ValueError("Image used by overlay or image.")
         shutil.rmtree(self.image_path)
 
         return True
@@ -421,7 +426,7 @@ class Izba():
     def rm(self, force=False, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self._with_overlay:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
 
         import shutil
 
@@ -463,7 +468,7 @@ class Izba():
     def start(self, exist_ok=False, **opts) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self._with_overlay:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
         
         # TODO: Do some sanity checks here.
 
@@ -474,7 +479,7 @@ class Izba():
     def stop(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self._with_overlay:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
 
         if self.driver is None:
             log.error("Driver is unavailable. Exiting.")
@@ -487,7 +492,7 @@ class Izba():
     def logs(self, user='user', golden=False, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self._with_overlay:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
 
         logfile_fpath = self.overlay_path / "logs" / "console.log"
         print(logfile_fpath.read_text())
@@ -497,7 +502,7 @@ class Izba():
     def exec(self, user='user', command=None, stdin=None, **opts) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self._with_overlay:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
 
         self.driver.exec_izba_command(self, user=user, command=command, stdin=stdin, **opts)
 
@@ -511,7 +516,7 @@ class Izba():
         '''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self._with_image:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_image().")
+            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_image().")
 
         if not self.create(name=name, network='none', console='none', **opts):
             print("Failed to create instance.")
