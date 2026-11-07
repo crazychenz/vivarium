@@ -1,23 +1,33 @@
+#!/usr/bin/env python3
 
+import sys
+import logging
+log = logging.getLogger(__name__)
 
-
-# Create sparse file with:
-# -------------------------------
-# SIZE_8_GIB = 8 << 30
-# out_raw = self.path / "out.raw"
-# out_raw.unlink(missing_ok=True)
-# with open(out_raw, "wb") as f:
-#     f.truncate(SIZE_8_GIB)
 
 SIZE_8_GIB = 8 << 30
-def make_file_sparse(path: Path="out.raw", size: int=8 << 30):
+def make_file_sparse(path: Path="out.raw", size: int=SIZE_8_GIB):
     import os
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "wb") as f:
         f.truncate(0)
-        f.truncate(SIZE_8_GIB)
+        f.truncate(size)
         f.seek(0)
 
 
+# out = find_dev_by_serial("oci_out")
+# out=$(grep -lx oci_out /sys/block/vd*/serial 2>/dev/null | sed -n 's|^/sys/block/\(vd[^/]*\)/serial$|/dev/\1|p' | tail -n1)
+def find_dev_by_serial(serial, prefix="vd"):
+    from pathlib import Path
+
+    found = None
+    for dev in sorted(Path("/sys/block").glob(f"{prefix}*")):
+        try:
+            if (dev / "serial").read_text().rstrip("\n") == serial:
+                found = f"/dev/{dev.name}"
+        except OSError:
+            continue
+    return found
 
 
 '''

@@ -235,6 +235,7 @@ class Izba():
         self.imageid = uuid7()
         self.build_path = self.construction_path / self.imageid.hex
         self.image_path = self.images_path / "by_id" / self.imageid.hex
+
         self.image_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Create standard folders for build path
@@ -498,7 +499,7 @@ class Izba():
         if not self._with_overlay:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
 
-        self.driver.exec_izba_command(self, user=user, command=command, stdin=stdin)
+        self.driver.exec_izba_command(self, user=user, command=command, stdin=stdin, **opts)
 
 
     # If instance image missing, call create()

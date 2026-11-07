@@ -19,99 +19,48 @@ class VivAgentProfile():
         if not self.rig._with_profile:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
 
+        # Do all vivarium based izba in vivarium rig folder to prevent conflicts.
+        self.izba_path = self.rig.rig_path / "izba"
+        self.izba_path.mkdir(parents=True, exist_ok=True)
+
         # - agent - tbd
         # - enclosure - tbd (virtiofsd stuff?)
         # - mcpg - for storing configs and logs
         # - mitm - for storing mitm config, certs, and captures
 
-        for folder in ['mitm', 'mcpg', 'enclosure', 'agent']:
+        from thirdparty.vivarium.profile.vivarium.agent.mitmproxy import MitmProxy
+        self.mitm = MitmProxy(self.rig)
+
+        from thirdparty.vivarium.profile.vivarium.agent.wgbridge import WireguardBridge
+
+        for folder in ['mcpg', 'enclosure', 'agent']:
             (rig.rig_path / folder).mkdir(parents=True, exist_ok=True)
-        self.mitm_path = rig.rig_path / "mitm"
         self.mcpg_path = rig.rig_path / "mcpg"
         self.agent_path = rig.rig_path / "agent"
         self.enclosure_path = rig.rig_path / "enclosure"
 
+        
 
     def build(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self.rig._with_profile:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
 
-        # TODO: - Generate mitm certificates and install as VM build process.
-        # from thirdparty.vivarium.profile.vivarium.agent.mitmproxy import generate_mitmproxy_certs
-        # generate_mitmproxy_certs(confdir=self.mitm_path)
+        # TODO: - Install certs into VM/OCI build process.
+        # Creates mitmproxy certificates
+        self.mitm.generate_mitmproxy_certs()
+        self.mitm.generate_mitmproxy_config()
 
+        # Build the agent OCI with izba.
         from thirdparty.vivarium.profile.vivarium.agent.oci import AgentOciBuilder
         agent_oci_builder = AgentOciBuilder(self)
-        agent_oci_builder.build_agent_oci_image()
-
-
-        # Run qemu with:
-        # ----------------
-        # drives=[
-        #     ... 
-        #     qapi.Drive(id="out", file=Path("out.raw"), format="raw", interface="none"),
-        #     ...
-        # ],
-        # devices=[
-        #     ...
-        #     qapi.VirtioBlk(drive="out", serial="oci_out"),
-        #     ...
-        # ],
-
-        # Within qemu, identify device by serial (e.g. "oci_out"):
-        # ----------------------------------------
-        # for dev in /sys/block/vd*; do
-        #     if [ "$(cat "$dev/serial" 2>/dev/null)" = "$serial" ]; then
-        #         out=/dev/${dev##*/}
-        #     fi
-        # done
-
-        # Export docker image via device:
-        # --------------------------------
-        # podman save --format docker-archive -o "$out" "$tag"
-
-        # On host, we truncate the sparse (tar) file.
-        # ---------------------------------------------
-        # def collect(self):
-        #     def tar_end_offset(path) -> int:
-        #         import tarfile
-        #         with tarfile.open(path, "r:") as tar:
-        #             for _ in tar:
-        #                 pass
-        #             return tar.offset + 2 * tarfile.BLOCKSIZE   # end-of-archive marker
-
-        #     import shutil
-        #     import tarfile
-
-        #     out_raw = self.path / "out.raw"
-        #     try:
-        #         with tarfile.open(out_raw, "r:") as tar:
-        #             names = tar.getnames()
-        #     except tarfile.ReadError as e:
-        #         raise RuntimeError(f"build produced no image ({e}), see {self.path / 'logs' / 'console.log'}")
-
-        #     # docker-archive writes manifest.json last, so it only exists if the save completed.
-        #     # (An untouched, all-zero disk opens fine as an empty tar and also lands here.)
-        #     if "manifest.json" not in names:
-        #         raise RuntimeError(f"no complete image on out.raw, see {self.path / 'logs' / 'console.log'}")
-
-        #     with open(out_raw, "r+b") as f:
-        #         f.truncate(tar_end_offset(out_raw))
-
-        #     self.images_path.mkdir(parents=True, exist_ok=True)
-        #     shutil.move(out_raw, self.image_path)
-        #     (self.path / "root.qcow2").unlink(missing_ok=True)
-
-        # Once collected, we re-truncate the file back to all zeros.
-        # --------------------------------------------
-        # os.truncate(path, 0)
-        # os.truncate(path, size)
+        agent_oci_builder.build_agent_oci_image(self.agent_path / "agent-oci.tar")
 
         # Optionally clean up.
         # ----------------------
         # izba.stop()
         # izba.rm(force=True)
+
 
         # TODO: izba agent VM with VivAgentIzbaProfile profile
         # TODO: Put the container image in the seed for install.
@@ -149,6 +98,9 @@ class VivAgentProfile():
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self.rig._with_profile:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+
+        start_
+        start_mitmproxy(self.mitm_path / "mitmdump.pid")
 
         # TODO: run vm wireguard bridge
         # TODO: run mitm (with addons)

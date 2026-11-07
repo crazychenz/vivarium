@@ -101,10 +101,14 @@ class IzbaCrtDriver():
         # shutil.copytree(izba.gold_path / "keys", izba.gold_path / "import", dirs_exist_ok=True)
 
 
-    def build_izba_init(self, izba, **opts):
+    def build_izba_init(self, izba, callbacks={}, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         self.cloud_init_user_data = self._build_base_cloud_config(izba, reboot=self.firstboot_reboot)
+
+        cloud_config_cb = callbacks.get('build_izba_init_cloud_config_cb', None)
+        if cloud_config_cb:
+            cloud_config_cb(self, izba, self.cloud_init_user_data)
 
         import time
         # TODO: Add part of imageid?
@@ -427,7 +431,8 @@ class IzbaCrtDriver():
                 diag_fpath = Path("logs") / f"qemu-diagnostics-{int(time.time())}.txt"
                 migrate_error = None
                 graph_before = None
-                with qmp.QmpClient(qmp_fpath) as mon:
+                # Relative: an absolute path can exceed the AF_UNIX path limit (~108 bytes).
+                with qmp.QmpClient(qmp_fpath.relative_to(izba.build_path)) as mon:
                     try:
                         mon.execute(qmp.Stop())
                         # Kept for diagnostics: migration completion inactivates every block
@@ -641,7 +646,8 @@ class IzbaCrtDriver():
                 no_user_config=True,
                 display="none",
                 serial=[qapi.ChardevFile(path=log_fpath)],
-                qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
+                # Relative: an absolute path can exceed the AF_UNIX path limit (~108 bytes).
+                qmp=[qapi.ChardevSocket(path=qmp_fpath.relative_to(izba.overlay_path), server=True, wait=False)],
                 pidfile=pidfile_fpath,
                 daemonize=True,
                 sandbox=True,
@@ -691,7 +697,7 @@ class IzbaCrtDriver():
             status = None
             deadline = time.monotonic() + 120
             try:
-                with qmp.QmpClient(qmp_fpath) as mon:
+                with qmp.QmpClient(qmp_fpath.relative_to(izba.overlay_path)) as mon:
                     while time.monotonic() < deadline:
                         status = mon.execute(qmp.QueryStatus()).status
                         if status == "running":
@@ -771,7 +777,7 @@ class IzbaCrtDriver():
 
 
     # Executes command in VM (via SSH)
-    def exec_izba_command(self, izba, user='user', command=None, stdin=None):
+    def exec_izba_command(self, izba, user='user', command=None, stdin=None, artifact_name=None):
         print(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         from pathlib import Path
@@ -784,6 +790,9 @@ class IzbaCrtDriver():
         # Is the system running?
         pid = read_pid(pidfile_fpath)
         if pid and is_alive(pid) and is_qemu_process(pid):
+            if command and artifact_name:
+                artifact_path = izba.overlay_path / "artifacts" / f"exec-{artifact_name}.sh"
+                artifact_path.write_text(' '.join(command))
             ssh_host_port_fpath = izba.overlay_path / "run" / "ssh_host_port"
             from thirdparty.izba.subprocess.ssh import stdin_ssh_run
             stdin_ssh_run(

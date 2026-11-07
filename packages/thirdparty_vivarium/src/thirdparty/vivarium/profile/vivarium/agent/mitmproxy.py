@@ -6,43 +6,7 @@ log = logging.getLogger(__name__)
 
 from pathlib import Path
 
-def generate_mitmproxy_certs(base_name = "mitmproxy", confdir="~/.mitmproxy", key_size=2048, force=False, days=3650) -> int:
-    import datetime
-    import sys
 
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes
-    from mitmproxy import certs
-    from mitmproxy.certs import CertStore
-
-    certs.CA_EXPIRY = datetime.timedelta(days=days)
-    confdir = Path(confdir).expanduser()
-    cert_path = confdir / f"{base_name}-ca-cert.pem"
-    key_path = confdir / f"{base_name}-ca.pem"
-
-    if cert_path.exists() or key_path.exists():
-        if not force:
-            print(f"CA already exists in {confdir}; use --force to replace it.", file=sys.stderr)
-            return 1
-        # CertStore.from_store() loads existing files instead of regenerating, so remove them first.
-        for p in [*confdir.glob(f"{base_name}-ca*"), confdir / f"{base_name}-dhparam.pem"]:
-            p.unlink(missing_ok=True)
-
-    confdir.mkdir(parents=True, exist_ok=True)
-    confdir.chmod(0o700)
-
-    CertStore.from_store(confdir, base_name, key_size)
-
-    key_path.chmod(0o600)  # contains the private key
-
-    cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
-    print(f"Wrote {cert_path}  (public, copy this to guests)")
-    print(f"Wrote {key_path}  (PRIVATE KEY, keep on host)")
-    print(f"Subject: {cert.subject.rfc4514_string()}")
-    print(f"Expires: {cert.not_valid_after_utc:%Y-%m-%d}" if hasattr(cert, "not_valid_after_utc")
-          else f"Expires: {cert.not_valid_after:%Y-%m-%d}")
-    print(f"SHA256:  {cert.fingerprint(hashes.SHA256()).hex(':')}")
-    return 0
 
 
 
@@ -105,19 +69,81 @@ mitmproxy_config_yaml_indented = '''
 class MitmProxy():
     # *Note: Do not store deployment ref in class, we do not want 
     # *bi-directional linkage between vivarium these classes.
-    def __init__(self, deployment : "Deployment", name: str = 'default'):
-        self.deployment_path = deployment.path
-        self.path = self.deployment_path / 'mitm' / name
+    def __init__(self, rig : "Rig", name: str = 'default'):
+        
+        self.path = rig.rig_path / 'mitm' / name
+
         # keys for ssh keys and certs
         # run for sockets and pid files
         for sub in ['config', 'keys', 'run', 'logs']:
             (self.path / sub).mkdir(parents=True, exist_ok=True)
+        self.pidfile_fpath = self.path / "run" / "mitmdump.pid"
+        self.logfile_fpath = self.path / "logs" / "mitmdump-console.log"
+        self.config_fpath = self.path / "config" / "config.yaml"
         
         # Creates mitmproxy certificates
-        mitm_config_path = self.path / "config"
-        generate_mitmproxy_certs(confdir=mitm_config_path)
+        self.generate_mitmproxy_certs()
 
+        
+
+    def generate_mitmproxy_config(self):
         # Generate mitmproxy config configuration
         mitmproxy_config_yaml = "\n".join(line[4:] for line in mitmproxy_config_yaml_indented.splitlines()) + "\n"
-        (mitm_config_path / "config.yaml").write_text(mitmproxy_config_yaml, encoding="utf-8")
+        self.config_fpath.write_text(mitmproxy_config_yaml, encoding="utf-8")
         #   TODO: Does wireguard config always get auto configured?
+
+
+    def generate_mitmproxy_certs(self, confdir=None, base_name = "mitmproxy", key_size=2048, force=False, days=3650) -> int:
+        import datetime
+        import sys
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes
+        from mitmproxy import certs
+        from mitmproxy.certs import CertStore
+
+        if confdir is None:
+            confdir = self.config_fpath.parent
+
+        certs.CA_EXPIRY = datetime.timedelta(days=days)
+        confdir = Path(confdir).expanduser()
+        cert_path = confdir / f"{base_name}-ca-cert.pem"
+        key_path = confdir / f"{base_name}-ca.pem"
+
+        if cert_path.exists() or key_path.exists():
+            if not force:
+                print(f"CA already exists in {confdir}; use --force to replace it.", file=sys.stderr)
+                return 1
+            # CertStore.from_store() loads existing files instead of regenerating, so remove them first.
+            for p in [*confdir.glob(f"{base_name}-ca*"), confdir / f"{base_name}-dhparam.pem"]:
+                p.unlink(missing_ok=True)
+
+        confdir.mkdir(parents=True, exist_ok=True)
+        confdir.chmod(0o700)
+
+        CertStore.from_store(confdir, base_name, key_size)
+
+        key_path.chmod(0o600)  # contains the private key
+
+        cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+        print(f"Wrote {cert_path}  (public, copy this to guests)")
+        print(f"Wrote {key_path}  (PRIVATE KEY, keep on host)")
+        print(f"Subject: {cert.subject.rfc4514_string()}")
+        print(f"Expires: {cert.not_valid_after_utc:%Y-%m-%d}" if hasattr(cert, "not_valid_after_utc")
+            else f"Expires: {cert.not_valid_after:%Y-%m-%d}")
+        print(f"SHA256:  {cert.fingerprint(hashes.SHA256()).hex(':')}")
+        return 0
+
+
+    def start_mitmdump(self, args=[]):
+        from thirdparty.izba.subprocess import run_background_process_logged
+        # TODO: Rotate mitmdump-console.log (currently only appends)
+        self.mitmdump_pid = run_background_process_logged(self.pidfile_fpath, ['mitmdump', *args], self.logfile_fpath)
+        log.info(f"Started mitmdump with pid {pid}")
+        return pid
+
+
+    def is_mitmproxy_process(self, prefix: str = "mitm") -> bool:
+        from thirdparty.izba.subprocess import read_pid, is_process_with_prefix
+        return is_process_with_prefix(read_pid(self.pidfile_fpath), "mitmdump")
+

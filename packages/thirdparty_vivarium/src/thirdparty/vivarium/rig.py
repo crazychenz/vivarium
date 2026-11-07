@@ -19,7 +19,9 @@ class Rig():
         import thirdparty.vivarium.config as cfg
 
         self.config = config
+        # Vivarium's base path
         self.base_path = cfg.resolve_base_path(config)
+        # Vivarium's rigs path
         self.rigs_path = cfg.resolve_rigs_path(config)
 
         self._with_profile = False

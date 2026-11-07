@@ -20,6 +20,38 @@ def try_stdin():
     return sys.stdin if piped else None
 
 
+from pathlib import Path
+def run_background_process_logged(pidfile: Path | str, *args: str, log_file: Path | str | None = None) -> int:
+    """
+    Start process in the background and write its pid to `pidfile`.
+
+    Returns the pid of the started process.
+    """
+    import subprocess
+    pidfile = Path(pidfile)
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+
+    if log_file is not None:
+        log_file = Path(log_file)
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        stdout = open(log_file, "ab")
+        stderr = stdout
+    else:
+        stdout = subprocess.DEVNULL
+        stderr = subprocess.DEVNULL
+
+    proc = subprocess.Popen(
+        [*args],
+        stdout=stdout,
+        stderr=stderr,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,  # detach from our process group/controlling tty
+    )
+
+    pidfile.write_text(str(proc.pid))
+    return proc.pid
+
+
 def run_with_timeout(args, timeout, grace=5):
     proc = subprocess.Popen(
         args,
@@ -155,6 +187,21 @@ def pidfile_shutdown(pidfile: Path, sig: int = signal.SIGTERM) -> bool:
     return pid_shutdown(pid)
 
 
+def is_process_with_prefix(pid: int, prefix: str) -> bool:
+    """True if pid is a live (non-zombie) process whose executable is `name`."""
+    from pathlib import Path
+    proc = Path("/proc") / str(pid)
+    try:
+        # cmdline is NUL-separated; argv[0] is the executable as launched.
+        argv0 = (proc / "cmdline").read_bytes().split(b"\0", 1)[0].decode(errors="replace")
+        # /proc/<pid>/stat: "pid (comm) S ..." - state follows the last ')'
+        state = (proc / "stat").read_text().rsplit(")", 1)[1].split()[0]
+    except (FileNotFoundError, ProcessLookupError, PermissionError, IndexError):
+        return False
+
+    if state in ("Z", "X"):  # zombie / dead
+        return False
+    return Path(argv0).name.startswith(prefix)
 
 
 

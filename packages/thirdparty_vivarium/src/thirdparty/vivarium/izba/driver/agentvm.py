@@ -421,7 +421,8 @@ class IzbaCrtDriver():
                 diag_fpath = Path("logs") / f"qemu-diagnostics-{int(time.time())}.txt"
                 migrate_error = None
                 graph_before = None
-                with qmp.QmpClient(qmp_fpath) as mon:
+                # Relative: an absolute path can exceed the AF_UNIX path limit (~108 bytes).
+                with qmp.QmpClient(qmp_fpath.relative_to(izba.build_path)) as mon:
                     try:
                         mon.execute(qmp.Stop())
                         # Kept for diagnostics: migration completion inactivates every block
@@ -635,7 +636,8 @@ class IzbaCrtDriver():
                 no_user_config=True,
                 display="none",
                 serial=[qapi.ChardevFile(path=log_fpath)],
-                qmp=[qapi.ChardevSocket(path=qmp_fpath, server=True, wait=False)],
+                # Relative: an absolute path can exceed the AF_UNIX path limit (~108 bytes).
+                qmp=[qapi.ChardevSocket(path=qmp_fpath.relative_to(izba.overlay_path), server=True, wait=False)],
                 pidfile=pidfile_fpath,
                 daemonize=True,
                 sandbox=True,
@@ -679,7 +681,7 @@ class IzbaCrtDriver():
             status = None
             deadline = time.monotonic() + 120
             try:
-                with qmp.QmpClient(qmp_fpath) as mon:
+                with qmp.QmpClient(qmp_fpath.relative_to(izba.overlay_path)) as mon:
                     while time.monotonic() < deadline:
                         status = mon.execute(qmp.QueryStatus()).status
                         if status == "running":
