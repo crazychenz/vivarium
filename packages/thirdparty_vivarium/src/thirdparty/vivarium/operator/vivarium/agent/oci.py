@@ -5,15 +5,15 @@ import logging
 log = logging.getLogger(__name__)
 
 class AgentOciBuilder():
-    def __init__(self, profile):
-        self.profile = profile
+    def __init__(self, operator):
+        self.operator = operator
 
     def build_agent_oci_image(self, dest_oci_fpath):
         # --- TODO: izba agent container image with crt ---
 
-        # TODO: How do we set the izba config file as a viv profile configuration?
+        # TODO: How do we set the izba config file as a viv operator configuration?
         from thirdparty.izba.config import load_izba_config
-        izba_config = load_izba_config(user_config={"base_path": self.profile.izba_path})
+        izba_config = load_izba_config(user_config={"base_path": self.operator.rig.izba_path})
 
         import io
         from thirdparty.izba import Izba

@@ -80,11 +80,7 @@ class MitmProxy():
         self.pidfile_fpath = self.path / "run" / "mitmdump.pid"
         self.logfile_fpath = self.path / "logs" / "mitmdump-console.log"
         self.config_fpath = self.path / "config" / "config.yaml"
-        
-        # Creates mitmproxy certificates
-        self.generate_mitmproxy_certs()
-
-        
+      
 
     def generate_mitmproxy_config(self):
         # Generate mitmproxy config configuration
@@ -145,5 +141,16 @@ class MitmProxy():
 
     def is_alive(self, prefix: str = "mitmdump") -> bool:
         from thirdparty.izba.subprocess import read_pid, is_alive
-        return is_alive(read_pid(self.pidfile_fpath))
+        pid = read_pid(self.pidfile_fpath)
+        if pid is None:
+            return False
+        return is_alive(pid)
+    
+    def kill(self):
+        from thirdparty.izba.subprocess import read_pid, pid_shutdown
+        pid = read_pid(self.pidfile_fpath)
+        if pid is None:
+            return
+        if self.is_alive():
+            pid_shutdown(pid)
 

@@ -5,14 +5,6 @@ import logging
 log = logging.getLogger(__name__)
 
 
-def parse_profile_string(profile_value, def_profile_inst='default'):
-    profile_parts = profile_value.strip().split('/', 1)
-    profile_inst = def_profile_inst
-    if len(profile_parts) > 1:
-        profile_inst = profile_parts[1]
-    return profile_parts[0], profile_inst
-
-
 class Rig():
 
     def __init__(self, config):
@@ -24,21 +16,36 @@ class Rig():
         # Vivarium's rigs path
         self.rigs_path = cfg.resolve_rigs_path(config)
 
-        self._with_profile = False
+        self._with_operator = False
+        self._with_rig = False
 
 
-    def with_profile(self, profile_value):
+    def with_operator(self, operator):
 
-        from thirdparty.vivarium.profile import get_viv_profile_eps
-        profile_index = get_viv_profile_eps()
+        from thirdparty.vivarium.operator import get_viv_operator_eps
+        operator_index = get_viv_operator_eps()
 
-        self.profile_name, self.profile_inst = parse_profile_string(profile_value)
-        self.rig_path = self.rigs_path / self.profile_name / self.profile_inst
-        self._with_profile = True
+        self.operator_name = operator
+        self._with_operator = True
 
-        profile_cls = profile_index._index[self.profile_name]['class']
-        profile_opts = profile_index._index[self.profile_name]['opts']
-        self.profile = profile_cls(self, **profile_opts)
+        operator_cls = operator_index._index[self.operator_name]['class']
+        operator_opts = operator_index._index[self.operator_name]['opts']
+        self.operator = operator_cls(self, **operator_opts)
+
+        return self
+
+
+    def with_rig(self, rig_name):
+
+        self.rig_name = rig_name
+        self.rig_path = self.rigs_path / self.rig_name
+        self.izba_path = self.rig_path / "izba"
+        self.operator_name = (self.rig_path / "operator").read_text().strip()
+
+        self.with_operator(self.operator_name)
+
+        self._with_operator = True
+        self._with_rig = True
 
         return self
 
@@ -47,50 +54,61 @@ class Rig():
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         # TODO: Cheap stop gap
-        for profile_entry in self.rigs_path.iterdir():
-            if profile_entry.is_dir():
-                for inst_entry in profile_entry.iterdir():
-                    if inst_entry.is_dir():
-                        print(f"{profile_entry.name}/{inst_entry.name}")
+        for rig_entry in self.rigs_path.iterdir():
+            if rig_entry.is_dir():
+                print(f"{rig_entry.name}")
     
 
-    def build(self, **opts):
+    def build(self, name=None, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self._with_operator:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_operator().")
 
-        self.profile.build(**opts)
+        if name is not None:
+            # TODO: Verify name is a valid choice.
+            pass
+
+        if name is None:
+            from thirdparty.vivarium.path import generate_path
+            self.rig_path = generate_path(self.rigs_path)
+        else:
+            self.rig_path = self.rigs_path / name
+        self.izba_path = self.rig_path / "izba"
+        self.izba_path.mkdir(parents=True, exist_ok=True)
+        (self.rig_path / "operator").write_text(self.operator_name)
+
+        self.operator.build(name=name, **opts)
 
 
     def run(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self._with_rig:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
         
-        self.profile.run(**opts)
+        self.operator.run(**opts)
 
 
     def stop(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self._with_rig:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
         
-        self.profile.stop(**opts)
+        self.operator.stop(**opts)
 
 
     def rm(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self._with_rig:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
         
-        self.profile.rm(**opts)
+        self.operator.rm(**opts)
 
 
     def inspect(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self._with_rig:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
 
-        self.profile.inspect(**opts)
+        self.operator.inspect(**opts)
 
 

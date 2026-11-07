@@ -32,6 +32,14 @@ class WireguardBridge():
     def is_alive(self) -> bool:
         from thirdparty.izba.subprocess import read_pid, is_alive
         pid = read_pid(self.pidfile_fpath)
-        if not pid:
+        if pid is None:
             return False
         return is_alive(pid)
+    
+    def kill(self):
+        from thirdparty.izba.subprocess import read_pid, pid_shutdown
+        pid = read_pid(self.pidfile_fpath)
+        if pid is None:
+            return
+        if self.is_alive():
+            pid_shutdown(pid)

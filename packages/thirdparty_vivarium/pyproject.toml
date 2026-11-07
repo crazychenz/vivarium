@@ -34,11 +34,11 @@ namespaces = true
 vivarium = "thirdparty.vivarium.cli:main"
 viv = "thirdparty.vivarium.cli:main"
 
-[project.entry-points."thirdparty_vivarium_profiles"]
-# Register agent (agentic sandbox) as an vivarium profile
-agent = "thirdparty.vivarium.profile.vivarium.agent:register_profile_agent"
+[project.entry-points."thirdparty_vivarium_operators"]
+# Register agent (agentic sandbox) as an vivarium operator
+agent = "thirdparty.vivarium.operator.vivarium.agent:register_operator_agent"
 
 [project.entry-points."thirdparty_izba_drivers"]
 # Register crt (container runtime) as an izba driver
-vivarium.agentvm = "thirdparty.vivarium.izba.driver.agentvm:register_driver_agentvm"
-vivarium.enclosurevm = "thirdparty.vivarium.izba.driver.enclosurevm:register_driver_enclosurevm"
+#vivarium_agentvm = "thirdparty.vivarium.izba.driver.agentvm:register_driver_agentvm"
+#vivarium_enclosurevm = "thirdparty.vivarium.izba.driver.enclosurevm:register_driver_enclosurevm"

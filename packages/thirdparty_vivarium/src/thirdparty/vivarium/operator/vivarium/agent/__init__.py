@@ -5,50 +5,40 @@ import logging
 log = logging.getLogger(__name__)
 
 
-from thirdparty.vivarium.profile import ProfileIndex
-def register_profile_agent(profile_index: ProfileIndex):
-    profile_index.register_profile_class('agent', VivAgentProfile)
+from thirdparty.vivarium.operator import OperatorIndex
+def register_operator_agent(operator_index: OperatorIndex):
+    operator_index.register_operator_class('agent', VivAgentOperator)
 
 
-class VivAgentProfile():
+class VivAgentOperator():
     def __init__(self, rig, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        # Create profile folders if they don't exist.
+        # Create operator folders if they don't exist.
         self.rig = rig
-        if not self.rig._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self.rig._with_operator:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_operator().")
 
-        # Do all vivarium based izba in vivarium rig folder to prevent conflicts.
-        self.izba_path = self.rig.rig_path / "izba"
-        self.izba_path.mkdir(parents=True, exist_ok=True)
-
-        # - agent - tbd
-        # - enclosure - tbd (virtiofsd stuff?)
-        # - mcpg - for storing configs and logs
-        # - mitm - for storing mitm config, certs, and captures
-
-        from thirdparty.vivarium.profile.vivarium.agent.mitmproxy import MitmProxy
+        from thirdparty.vivarium.operator.vivarium.agent.mitmproxy import MitmProxy
         self.mitm = MitmProxy(self.rig)
 
-        from thirdparty.vivarium.profile.vivarium.agent.wgbridge import WireguardBridge
+        from thirdparty.vivarium.operator.vivarium.agent.wgbridge import WireguardBridge
         self.wgbridge = WireguardBridge(self.rig)
         
-        from thirdparty.vivarium.profile.vivarium.agent.agentvm import AgentVm
+        from thirdparty.vivarium.operator.vivarium.agent.agentvm import AgentVm
         self.agentvm = AgentVm(self)
 
-        for folder in ['mcpg', 'enclosure', 'agent']:
-            (rig.rig_path / folder).mkdir(parents=True, exist_ok=True)
-        self.mcpg_path = rig.rig_path / "mcpg"
-        self.agent_path = rig.rig_path / "agent"
-        self.enclosure_path = rig.rig_path / "enclosure"
-
-        
 
     def build(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self.rig._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self.rig._with_operator:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_operator().")
+
+        for folder in ['mcpg', 'enclosure', 'agent']:
+            (self.rig.rig_path / folder).mkdir(parents=True, exist_ok=True)
+        self.mcpg_path = self.rig.rig_path / "mcpg"
+        self.agent_path = self.rig.rig_path / "agent"
+        self.enclosure_path = self.rig.rig_path / "enclosure"
 
         # TODO: - Install certs into VM/OCI build process.
         # Creates mitmproxy certificates
@@ -59,7 +49,7 @@ class VivAgentProfile():
         agent_oci_fpath = self.agent_path / "agent-oci.tar"
         # TODO: Allow to forcefully rebuild
         if not agent_oci_fpath.exists():
-            from thirdparty.vivarium.profile.vivarium.agent.oci import AgentOciBuilder
+            from thirdparty.vivarium.operator.vivarium.agent.oci import AgentOciBuilder
             agent_oci_builder = AgentOciBuilder(self)
             agent_oci_builder.build_agent_oci_image(self.agent_path / "agent-oci.tar")
 
@@ -68,7 +58,7 @@ class VivAgentProfile():
         # izba.stop()
         # izba.rm(force=True)
 
-        # TODO: izba agent VM with VivAgentIzbaProfile profile
+        # TODO: izba agent VM with VivAgentIzbaOperator operator
         # TODO: Put the container image in the seed for install.
         self.agentvm.build_vm()
 
@@ -76,7 +66,7 @@ class VivAgentProfile():
 
         # agent_izba.exec(user='user', command=['cat', '/etc/passwd']) #, stdin=try_stdin())
 
-        # TODO: izba enclosure VM with VivEnclosureIzbaProfile profile
+        # TODO: izba enclosure VM with VivEnclosureIzbaOperator operator
         # TODO: Put the container image in the seed for install.
         # driver_name='vivarium.enclosure'
         # image_name='agent'
@@ -93,8 +83,8 @@ class VivAgentProfile():
 
     def run(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self.rig._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self.rig._with_rig:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
 
         if not self.mitm.is_alive(): # ! checking for prefix mitmdump does not work.
             # TODO: Include Addons
@@ -118,21 +108,24 @@ class VivAgentProfile():
         else:
             log.info(f"qemu-wg-bridge already running")
 
-        self.agentvm.start_vm()
-  
-
-        
-        # TODO: run mitm (with addons)
         # TODO: run mcpg (with tools configured)
         # TODO: run virtiofsd (implicit as part of izba?)
         # TODO: run enclosurevm
-        # TODO: run agentvm
+
+        self.agentvm.start_vm()
 
 
     def stop(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self.rig._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self.rig._with_rig:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
+
+        self.wgbridge.kill()
+        #self.mcpg.kill()
+        self.mitm.kill()
+        self.agentvm.stop_vm()
+        #self.enclosure.kill()
+        #self.virtiofsd.kill()
 
         # Priority order: 1. kill internet, 2. kill intranet, 3. kill env
         # TODO: stop bridge
@@ -145,8 +138,8 @@ class VivAgentProfile():
 
     def rm(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self.rig._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self.rig._with_rig:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
 
         # TODO: rm rig
         # TODO: rm izba entries (if relevant)
@@ -154,8 +147,8 @@ class VivAgentProfile():
 
     def inspect(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self.rig._with_profile:
-            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_profile().")
+        if not self.rig._with_rig:
+            raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
 
         # TODO: running status (what is up/down, memory consumption, CPU/IO rates, load)
         # TODO: rig size

@@ -9,6 +9,28 @@ import subprocess
 from pathlib import Path
 
 
+DEFAULT_WORST_CASE_IZBA_BASE_PATH = Path('.') / "vivarium"
+
+
+def xdg_config_home() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    return Path(xdg) if xdg else Path.home() / ".config"
+
+
+def izba_xdg_config_home() -> Path:
+    return xdg_config_home() / "vivarium" / "config.yaml"
+
+
+def deep_merge(base: dict, overlay: dict) -> dict:
+    result = dict(base)
+    for key, value in overlay.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def baseline_empty_config():
     return {
         # Consider having a "dotenv" for credentials.
@@ -33,28 +55,30 @@ def baseline_empty_config():
     }
 
 
-def load_vivarium_config(config:dict={}, config_path=None):
+def load_vivarium_config(config_path=None, user_config={}):
     import yaml
     import thirdparty.vivarium.util as vivarium_util
 
     if config_path is None:
         config_path = vivarium_util.xdg_config_home() / "vivarium" / "config.yaml"
+        if not config_path.exists():
+            log.info(f"Config not found at: {config_path}, using defaults.")
+    else:
+        config_path = Path(config_path).resolve()
+        if not config_path.exists():
+            print(f"Config not found at: {config_path}, using defaults.")
 
-    config_path = config_path.resolve()
+    config = baseline_empty_config()
+    if config_path.exists():
+        config = deep_merge(config, yaml.safe_load(config_path.read_text()))
 
-    if not config_path.exists():
-        print(f"ERROR: {config_path} configuration does not exist.")
-        exit(1)
-
-    # Always start with baseline.
-    config = vivarium_util.deep_merge(baseline_empty_config(), config)
-
-    with open(str(config_path)) as f:
-        config = vivarium_util.deep_merge(config, yaml.safe_load(f))
-    
     # --- Apply environment overrides ---
 
-    config["base_dir"] = os.environ.get("VIVARIUM_BASE_DIR", config["base_dir"])
+    config["base_path"] = os.environ.get("VIVARIUM_BASE_PATH", config["base_path"])
+    config["rigs_path"] = os.environ.get("VIVARIUM_RIGS_PATH", config["rigs_path"])
+
+    # User config has priority here, but should never be used in base library.
+    config = deep_merge(config, user_config)
 
     return config
 

@@ -22,7 +22,7 @@ from thirdparty.vivarium.rig import Rig
 def init_argparse():
     # --- vivarium
     viv_parser = argparse.ArgumentParser(prog="vivarium")
-    viv_parser.add_argument("--config", dest="config", action="store", help="path to config.yaml")
+    viv_parser.add_argument("--config", dest="config", action="store", help="path to config.yaml", default=None)
     viv_parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity")
     viv_parser.add_argument("--breakpoint", action="store_true", default=False, help="Break before exist on exception.")
     viv_parser.add_argument(
@@ -55,28 +55,37 @@ def init_argparse():
 
     # --- viv rig build <type>[/name]
     viv_rig_build_parser = viv_rig_subparsers.add_parser("build")
-    viv_rig_build_parser.add_argument("rig_profile", default="agent/default")
+    viv_rig_build_parser.add_argument("--name", dest="name", default=None)
+    viv_rig_build_parser.add_argument("operator", default="agent")
     viv_rig_build_parser.set_defaults(func=viv_rig_build_func)
 
     # --- viv rig run <type>[/name]
     viv_rig_run_parser = viv_rig_subparsers.add_parser("run")
-    viv_rig_run_parser.add_argument("rig_profile", default="agent/default")
+    viv_rig_run_parser.add_argument("rig")
     viv_rig_run_parser.set_defaults(func=viv_rig_run_func)
 
     # --- viv rig stop <type>[/name]
     viv_rig_stop_parser = viv_rig_subparsers.add_parser("stop")
-    viv_rig_stop_parser.add_argument("rig_profile", default="agent/default")
+    viv_rig_stop_parser.add_argument("rig")
     viv_rig_stop_parser.set_defaults(func=viv_rig_stop_func)
 
     # --- viv rig rm <type>[/name]
     viv_rig_rm_parser = viv_rig_subparsers.add_parser("rm")
-    viv_rig_rm_parser.add_argument("rig_profile", default="agent/default")
+    viv_rig_rm_parser.add_argument("rig")
     viv_rig_rm_parser.set_defaults(func=viv_rig_rm_func)
 
     # --- viv rig inspect <type>
     viv_rig_inspect_parser = viv_rig_subparsers.add_parser("inspect")
-    viv_rig_inspect_parser.add_argument("rig_name", default="agent/default")
+    viv_rig_inspect_parser.add_argument("rig")
     viv_rig_inspect_parser.set_defaults(func=viv_rig_inspect_func)
+
+    # --- viv rig izba <rig_name> <izba_args>
+    viv_rig_izba_parser = viv_rig_subparsers.add_parser("izba")
+    viv_rig_izba_parser.add_argument("rig")
+    viv_rig_izba_parser.add_argument("izba_args", nargs=argparse.REMAINDER,
+                                     help="arguments passed through to izba")
+    viv_rig_izba_parser.set_defaults(func=viv_rig_izba_func)
+    
 
     return viv_parser
 
@@ -108,32 +117,40 @@ def viv_rig_ls_func(args, config):
 def viv_rig_build_func(args, config):
     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-    Rig(config).with_profile(args.rig_profile).build()
+    Rig(config).with_operator(args.operator).build(name=args.name)
 
 
 def viv_rig_run_func(args, config):
     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-    Rig(config).with_profile(args.rig_profile).run()
+    Rig(config).with_rig(args.rig).run()
 
 
 def viv_rig_stop_func(args, config):
     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-    Rig(config).with_profile(args.rig_profile).stop()
+    Rig(config).with_rig(args.rig).stop()
 
 
 def viv_rig_rm_func(args, config):
     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-    Rig(config).with_profile(args.rig_profile).rm()
+    Rig(config).with_rig(args.rig).rm()
 
 
 def viv_rig_inspect_func(args, config):
     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-    Rig(config).with_profile(args.rig_profile).inspect()
+    Rig(config).with_rig(args.rig).inspect()
 
+def viv_rig_izba_func(args, config):
+    log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+    import os
+    import subprocess
+    rig = Rig(config).with_rig(args.rig)
+    env = os.environ.copy()
+    env["IZBA_BASE_PATH"] = rig.rig_path / "izba"
+    subprocess.run(["izba", *args.izba_args], env=env, check=True)
 
 def main():
     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
@@ -151,26 +168,15 @@ def main():
 
     logging.basicConfig(level=level, format="%(levelname)-8s %(name)s: %(message)s")
 
+    # dissect logs a traceback for every optional format that isn't installed.
+    logging.getLogger("dissect.target").setLevel(logging.WARNING)
+
     for spec in args.log_level:
         module, level_name = spec.split(":")
         logging.getLogger(module).setLevel(getattr(logging, level_name.upper()))
 
-    # Default config
-    config = baseline_empty_config()
-    # Default config path
-    config_path = vivarium_util.xdg_config_home() / "vivarium" / "config.yaml"
-    if args.config:
-        config_path = Path(args.config)
-    if config_path.exists():
-        config = load_vivarium_config(config_path=config_path)
-    else:
-        print(f"Config not found at: {config_path}, using defaults.")
-
-    base_path = resolve_base_path(config)
- 
-    # from thirdparty.vivarium.env import apply_env
-    # # TODO: Read build tools from config or find newest.
-    # apply_env(base_dir)
+    from thirdparty.vivarium.config import load_vivarium_config
+    config = load_vivarium_config(config_path=args.config)
 
     try:
         args.func(args, config)
