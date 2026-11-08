@@ -18,7 +18,7 @@ class WireguardBridge():
         self.pidfile_fpath = self.path / "run" / "wgbridge.pid"
         self.logfile_fpath = self.path / "logs" / "wgbridge-console.log"
 
-        self.wgbridge_bin = '/opt/ityssd/thirdparty-ws/vivarium/venv/vivarium/bin/qemu-wg-bridge'
+        self.wgbridge_bin = 'qemu-wg-bridge'
 
 
     def start(self, args=[]):

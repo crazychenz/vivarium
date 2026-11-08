@@ -57,6 +57,7 @@ def baseline_empty_config():
 
 def load_vivarium_config(config_path=None, user_config={}):
     import yaml
+    from pathlib import Path
     import thirdparty.vivarium.util as vivarium_util
 
     if config_path is None:

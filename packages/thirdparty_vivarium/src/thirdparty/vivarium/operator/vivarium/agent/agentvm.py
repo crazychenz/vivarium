@@ -5,25 +5,60 @@ import logging
 log = logging.getLogger(__name__)
 
 from pathlib import Path
-
+import io
+from thirdparty.izba import Izba
+# TODO: How do we set the izba config file as a viv operator configuration?
+from thirdparty.izba.config import load_izba_config
 
 class AgentVm():
     def __init__(self, operator):
         self.operator = operator
 
-    def _init_izba_config(self):
-        if hasattr(self, '_agent_izba'):
-            return
-
-        import io
-        from thirdparty.izba import Izba
         self._driver_name='crt'
         # Note: We need to create a new image so we don't have to match the hardware from crt.
         self._image_name='agent'
         self._overlay_name='agent'
 
-        # TODO: How do we set the izba config file as a viv operator configuration?
-        from thirdparty.izba.config import load_izba_config
+
+    def inject_tunnel_network(self):
+        def inject_tunnel_args(driver, izba, qemu_cmd_obj):
+            import thirdparty.qemu.qapi as qapi
+
+            vm_path = izba.overlay_path if hasattr(izba, 'overlay_path') else izba.build_path
+            tun_qemu_side = vm_path / "run" / "tun_qemu_side.sock"
+            tun_bridge_side = vm_path / "run" / "tun_bridge_side.sock"
+
+            qemu_cmd_obj.netdevs.append(
+                qapi.NetdevDgram(
+                    id="tunnel",
+                    local=qapi.UnixSocketAddress(path=tun_qemu_side.relative_to(vm_path)),
+                    remote=qapi.UnixSocketAddress(path=tun_bridge_side.relative_to(vm_path)),
+                ),
+            )
+            qemu_cmd_obj.devices.append(qapi.VirtioNet(netdev="tunnel", mac="52:54:00:aa:00:01"))
+            return qemu_cmd_obj
+
+        self.callbacks = {
+            #'build_izba_base_qemu_cmd_cb': inject_sparse_device,
+            'build_izba_origin_qemu_cmd_cb': inject_tunnel_args,
+            'start_izba_qemu_cmd_cb': inject_tunnel_args,
+            #'build_izba_init_cloud_config_cb': inject_user_disk_permission,
+        }
+
+
+    def _init_with_overlay(self):
+        if hasattr(self, '_agent_izba'):
+            return
+
+        self._izba_config = load_izba_config(user_config={"base_path": self.operator.rig.izba_path})
+        self._agent_izba = Izba(self._izba_config)
+        self._agent_izba.with_overlay(overlay=self._overlay_name)
+        self.path = self.operator.rig.rig_path / "agent"
+
+
+    def build_vm(self):
+        
+        # izba_path not set until here for build (i.e. can't do it in __init__).
         self._izba_config = load_izba_config(user_config={"base_path": self.operator.rig.izba_path})
         self._agent_izba = Izba(self._izba_config)
         self._agent_izba.with_driver(driver=self._driver_name)
@@ -32,13 +67,11 @@ class AgentVm():
         self.path = self.operator.rig.rig_path / "agent"
         self.path.mkdir(parents=True, exist_ok=True)
 
-
-    def build_vm(self):
-        self._init_izba_config()
+        self.inject_tunnel_network()
 
         try:
             # Unlikely because of OCI phase.
-            self._agent_izba.build(tags=[self._image_name], exist_ok=True)
+            self._agent_izba.build(tags=[self._image_name], exist_ok=True, callbacks=self.callbacks)
         except FileExistsError:
             pass
         except:
@@ -57,13 +90,15 @@ class AgentVm():
 
 
     def start_vm(self):
-        self._init_izba_config()
+        self._init_with_overlay()
         # TODO: Verify its built?
 
         self._agent_izba.with_overlay(self._overlay_name)
 
+        self.inject_tunnel_network()
+
         try:
-            self._agent_izba.start(exist_ok=True)
+            self._agent_izba.start(exist_ok=True, callbacks=self.callbacks)
         except FileExistsError:
             pass
         except:
@@ -78,6 +113,12 @@ class AgentVm():
         log.info("Agent VM started")
 
     def stop_vm(self):
-        self._init_izba_config()
+        self._init_with_overlay()
 
         self._agent_izba.with_overlay(self._overlay_name).stop()
+
+    def is_alive(self):
+        self._init_with_overlay()
+
+        izba = self._agent_izba
+        return izba.driver.izba_is_running(izba, izba.overlay_path)

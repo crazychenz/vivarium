@@ -57,18 +57,6 @@ class IzbaCrtDriver():
         return 'crt'
 
 
-    # # Download the OS, kernel, and initrd
-    # self.driver.cache_izba_base(self)
-    # # Build data that could be used by init process
-    # self.driver.build_izba_data(self)
-    # # Build configuration and init process
-    # self.driver.build_izba_init(self)
-    # # Build the bundle exposed to app
-    # self.driver.build_izba_bundle(self)
-    # # Initialize the izba
-    # self.driver.build_izba(self)
-
-
     # Download the base image we'll base golden and instance images from.
     # Depends on cached target, internet, or available mirror.
     def cache_izba_base(self, izba, **opts):
@@ -177,7 +165,6 @@ class IzbaCrtDriver():
         return True
 
 
-
     def _qemu_build_base_image(self, izba, qemu_cmd_cb=None):
         kernel_cmdline = ' '.join([
             f"root=LABEL=cloudimg-rootfs",
@@ -209,6 +196,9 @@ class IzbaCrtDriver():
         qmp_fpath = run_fpath / "qemu.qmp"
         kernel_fpath = images_fpath / "vmlinuz"
         initrd_fpath = images_fpath / "initrd.img"
+
+        tunnel_qemu_side_fpath = run_fpath / "tunnel_qemu_side.sock"
+        tunnel_bridge_side_fpath = run_fpath / "tunnel_bridge_side.sock"
 
         from thirdparty.izba.network import find_free_port
         ssh_host_port = find_free_port(2222)
@@ -243,8 +233,25 @@ class IzbaCrtDriver():
                     qapi.Drive(id="root", file=base_image_fpath.relative_to(izba.build_path), format="qcow2", interface="none"),
                     qapi.Drive(id="seed", file=seed_fpath.relative_to(izba.build_path), format="raw", interface="none", readonly=True),
                 ],
-                netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
-                devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
+                netdevs=[
+                    # qapi.NetdevDgram(
+                    #     id="tunnel",
+                    #     local=qapi.UnixSocketAddress(path=tunnel_qemu_side_fpath.relative_to(izba.build_path)),
+                    #     remote=qapi.UnixSocketAddress(path=tunnel_bridge_side_fpath.relative_to(izba.build_path)),
+                    # ),
+                    qapi.NetdevUser(
+                        id="mgmt",
+                        #restrict=True,
+                        hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)],
+                    ),
+                ],
+                devices=[
+                    qapi.VirtioBlk(drive="root"),
+                    qapi.VirtioBlk(drive="seed"),
+                    # qapi.VirtioNet(netdev="tunnel", mac="52:54:00:aa:00:01"),
+                    qapi.VirtioNet(netdev="mgmt"),
+                    qapi.VirtioRng(),
+                ],
             )
 
             if qemu_cmd_cb:
@@ -337,6 +344,9 @@ class IzbaCrtDriver():
         kernel_fpath = images_fpath / "vmlinuz"
         initrd_fpath = images_fpath / "initrd.img"
 
+        tunnel_qemu_side_fpath = run_fpath / "tunnel_qemu_side.sock"
+        tunnel_bridge_side_fpath = run_fpath / "tunnel_bridge_side.sock"
+
         from thirdparty.izba.network import find_free_port
         ssh_host_port = find_free_port(2222)
         ssh_host_port_fpath = run_fpath / "ssh_host_port"
@@ -374,9 +384,26 @@ class IzbaCrtDriver():
                     qapi.Drive(id="root", file=Path(origin_overlay_fpath.relative_to(izba.build_path)).resolve(), format="qcow2", interface="none"),
                     qapi.Drive(id="seed", file=Path(seed_fpath.relative_to(izba.build_path)).resolve(), format="raw", interface="none", readonly=True),
                 ],
-                netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
-                devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
-                
+                netdevs=[
+                    # qapi.NetdevDgram(
+                    #     id="tunnel",
+                    #     local=qapi.UnixSocketAddress(path=tunnel_qemu_side_fpath.relative_to(izba.build_path)),
+                    #     remote=qapi.UnixSocketAddress(path=tunnel_bridge_side_fpath.relative_to(izba.build_path)),
+                    # ),
+                    qapi.NetdevUser(
+                        id="mgmt",
+                        #restrict=True,
+                        hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)],
+                    ),
+                ],
+                devices=[
+                    qapi.VirtioBlk(drive="root"),
+                    qapi.VirtioBlk(drive="seed"),
+                    # qapi.VirtioNet(netdev="tunnel", mac="52:54:00:aa:00:01"),
+                    qapi.VirtioNet(netdev="mgmt"),
+                    qapi.VirtioRng(),
+                ],
+
                 # --- diagnostics for the VM state save below ---
                 # With a log file and log items, QEMU should not point the daemon's stderr
                 # (error_report) at /dev/null; the trace events record which vmstate section
@@ -615,6 +642,9 @@ class IzbaCrtDriver():
         kernel_fpath = image_images_path / "vmlinuz"
         initrd_fpath = image_images_path / "initrd.img"
 
+        tunnel_qemu_side_fpath = run_fpath / "tunnel_qemu_side.sock"
+        tunnel_bridge_side_fpath = run_fpath / "tunnel_bridge_side.sock"
+
         from thirdparty.izba.network import find_free_port
         ssh_host_port = find_free_port(2222)
         ssh_host_port_fpath = run_fpath / "ssh_host_port"
@@ -661,8 +691,25 @@ class IzbaCrtDriver():
                     qapi.Drive(id="root", file=overlay_image_fpath, format="qcow2", interface="none"),
                     qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
                 ],
-                netdevs=[qapi.NetdevUser(id="n0", hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)])],
-                devices=[qapi.VirtioBlk(drive="root"), qapi.VirtioBlk(drive="seed"), qapi.VirtioNet(netdev="n0"), qapi.VirtioRng()],
+                netdevs=[
+                    # qapi.NetdevDgram(
+                    #     id="tunnel",
+                    #     local=qapi.UnixSocketAddress(path=tunnel_qemu_side_fpath.relative_to(izba.overlay_path)),
+                    #     remote=qapi.UnixSocketAddress(path=tunnel_bridge_side_fpath.relative_to(izba.overlay_path)),
+                    # ),
+                    qapi.NetdevUser(
+                        id="mgmt",
+                        #restrict=True,
+                        hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)],
+                    ),
+                ],
+                devices=[
+                    qapi.VirtioBlk(drive="root"),
+                    qapi.VirtioBlk(drive="seed"),
+                    # qapi.VirtioNet(netdev="tunnel", mac="52:54:00:aa:00:01"),
+                    qapi.VirtioNet(netdev="mgmt"),
+                    qapi.VirtioRng(),
+                ],
                 incoming=f"file:{state_fpath}",
                 msg_timestamp=True,
             )

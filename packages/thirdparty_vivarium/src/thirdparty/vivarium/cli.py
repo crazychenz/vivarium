@@ -150,9 +150,14 @@ def viv_rig_izba_func(args, config):
     rig = Rig(config).with_rig(args.rig)
     env = os.environ.copy()
     env["IZBA_BASE_PATH"] = rig.rig_path / "izba"
-    subprocess.run(["izba", *args.izba_args], env=env, check=True)
+    try:
+        subprocess.run(["izba", *args.izba_args], env=env, check=True)
+    except subprocess.CalledProcessError as e:
+        log.error(e)
+        exit(1)
 
 def main():
+    import sys
     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
     vivarium_parser = init_argparse()
@@ -175,8 +180,21 @@ def main():
         module, level_name = spec.split(":")
         logging.getLogger(module).setLevel(getattr(logging, level_name.upper()))
 
-    from thirdparty.vivarium.config import load_vivarium_config
+    from thirdparty.vivarium.config import load_vivarium_config, resolve_base_path
     config = load_vivarium_config(config_path=args.config)
+
+    # Assign our own path so our static tools get picked first.
+    # TODO: Consider allowing bin_path overrides.
+    import os
+    import sys
+    from pathlib import Path
+    PATH = os.environ["PATH"].split(os.pathsep)
+    vivarium_base_path = resolve_base_path(config)
+    vivarium_bin_fpath = vivarium_base_path / "bin"
+    venv_bin = Path(os.path.join(sys.prefix, "Scripts" if os.name == "nt" else "bin")).resolve()
+    PATH = [str(vivarium_bin_fpath), str(venv_bin), *PATH]
+    os.environ["PATH"] = os.pathsep.join(PATH)
+    log.debug(f"PATH={os.environ["PATH"]}")
 
     try:
         args.func(args, config)

@@ -73,11 +73,12 @@ class Rig():
             self.rig_path = generate_path(self.rigs_path)
         else:
             self.rig_path = self.rigs_path / name
+
         self.izba_path = self.rig_path / "izba"
         self.izba_path.mkdir(parents=True, exist_ok=True)
         (self.rig_path / "operator").write_text(self.operator_name)
 
-        self.operator.build(name=name, **opts)
+        self.operator.build(name=(self.rig_path.name if name is None else name), **opts)
 
 
     def run(self, **opts):

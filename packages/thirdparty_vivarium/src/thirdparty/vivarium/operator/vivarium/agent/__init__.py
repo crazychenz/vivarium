@@ -19,6 +19,11 @@ class VivAgentOperator():
         if not self.rig._with_operator:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_operator().")
 
+
+    def _init_components(self):
+        if hasattr(self, 'mitm'):
+            return
+        
         from thirdparty.vivarium.operator.vivarium.agent.mitmproxy import MitmProxy
         self.mitm = MitmProxy(self.rig)
 
@@ -28,11 +33,16 @@ class VivAgentOperator():
         from thirdparty.vivarium.operator.vivarium.agent.agentvm import AgentVm
         self.agentvm = AgentVm(self)
 
+        from thirdparty.vivarium.operator.vivarium.agent.enclosurevm import EnclosureVm
+        self.enclosurevm = EnclosureVm(self)
 
-    def build(self, **opts):
+
+    def build(self, name=None, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self.rig._with_operator:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_operator().")
+
+        self._init_components()
 
         for folder in ['mcpg', 'enclosure', 'agent']:
             (self.rig.rig_path / folder).mkdir(parents=True, exist_ok=True)
@@ -68,23 +78,15 @@ class VivAgentOperator():
 
         # TODO: izba enclosure VM with VivEnclosureIzbaOperator operator
         # TODO: Put the container image in the seed for install.
-        # driver_name='vivarium.enclosure'
-        # image_name='agent'
-        # overlay_name='agent'
-        # enclosure_izba = Izba(izba_config)
-        # enclosure_izba.with_driver(driver=driver_name)
-        # enclosure_izba.build(tags=[image_name], exist_ok=True)
-        # enclosure_izba.with_image(image=image_name)
-        # enclosure_izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
-        # enclosure_izba.with_overlay(overlay_name)
-        # enclosure_izba.start(exist_ok=True)
-        # enclosure_izba.exec(user='user', command=['cat', '/etc/passwd']) #, stdin=try_stdin())
+        self.enclosurevm.build_vm()
 
 
     def run(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if not self.rig._with_rig:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
+
+        self._init_components()
 
         if not self.mitm.is_alive(): # ! checking for prefix mitmdump does not work.
             # TODO: Include Addons
@@ -111,6 +113,7 @@ class VivAgentOperator():
         # TODO: run mcpg (with tools configured)
         # TODO: run virtiofsd (implicit as part of izba?)
         # TODO: run enclosurevm
+        self.enclosurevm.start_vm()
 
         self.agentvm.start_vm()
 
@@ -120,20 +123,22 @@ class VivAgentOperator():
         if not self.rig._with_rig:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
 
-        self.wgbridge.kill()
-        #self.mcpg.kill()
-        self.mitm.kill()
-        self.agentvm.stop_vm()
-        #self.enclosure.kill()
-        #self.virtiofsd.kill()
+        self._init_components()
 
-        # Priority order: 1. kill internet, 2. kill intranet, 3. kill env
-        # TODO: stop bridge
-        # TODO: stop mcpg
-        # TODO: stop mitm
-        # TODO: stop agentvm
-        # TODO: stop enclosurevm
-        # TODO: stop virtiofsd
+        #* Priority order: 1. kill internet, 2. kill intranet, 3. kill env
+        print("Killing wgbridge.")
+        self.wgbridge.kill()
+        print("Killing mcpg.")
+        #self.mcpg.kill()
+        print("Killing mitm.")
+        self.mitm.kill()
+        print("Killing agentvm.")
+        self.agentvm.stop_vm()
+        print("Killing enclosurevm.")
+        self.enclosurevm.stop_vm()
+        print("Killing virtiofsd.")
+        #self.virtiofsd.kill()
+        print("Stop complete.")
 
 
     def rm(self, **opts):
@@ -141,8 +146,12 @@ class VivAgentOperator():
         if not self.rig._with_rig:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
 
-        # TODO: rm rig
-        # TODO: rm izba entries (if relevant)
+        self._init_components()
+
+        print("Stopping all rig components.")
+        self.stop()
+        # TODO: Verify with user they want to remove an automate unlink.
+        print(f"rm -rf {self.rig.rig_path}")
 
 
     def inspect(self, **opts):
@@ -150,9 +159,15 @@ class VivAgentOperator():
         if not self.rig._with_rig:
             raise Exception(f"{sys._getframe().f_code.co_qualname} requires with_rig().")
 
+        self._init_components()
+
+        print(f"mitm alive: {self.mitm.is_alive()}")
+        print(f"wgbridge alive: {self.wgbridge.is_alive()}")
+        print(f"agentvm alive: {self.agentvm.is_alive()}")
+        print(f"enclosurevm alive: {self.enclosurevm.is_alive()}")
+        
+
         # TODO: running status (what is up/down, memory consumption, CPU/IO rates, load)
         # TODO: rig size
         # TODO: izba size (if relevant)
         # TODO: - virtfsio size
-
-
