@@ -8,7 +8,6 @@ import argparse
 import sys
 import argcomplete
 
-
 import thirdparty.vivarium.util as vivarium_util
 from thirdparty.vivarium.config import (
     load_vivarium_config,
@@ -85,7 +84,6 @@ def init_argparse():
     viv_rig_izba_parser.add_argument("izba_args", nargs=argparse.REMAINDER,
                                      help="arguments passed through to izba")
     viv_rig_izba_parser.set_defaults(func=viv_rig_izba_func)
-    
 
     return viv_parser
 
@@ -143,6 +141,7 @@ def viv_rig_inspect_func(args, config):
 
     Rig(config).with_rig(args.rig).inspect()
 
+
 def viv_rig_izba_func(args, config):
     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
     import os
@@ -155,6 +154,7 @@ def viv_rig_izba_func(args, config):
     except subprocess.CalledProcessError as e:
         log.error(e)
         exit(1)
+
 
 def main():
     import sys
