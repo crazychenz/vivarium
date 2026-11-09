@@ -93,8 +93,39 @@ tar -xf claude-config.tar
 # --network host required for sshd -R w/ "GatewayPorts no"
 docker run -ti --rm --network host -u $(id -u):$(id -g) -v "$HOME/claude-config":/home/node/.claude --entrypoint /bin/bash agent
 
-claude mcp add --transport http --scope user secure-api http://127.0.0.1:9000/mcp
+alias claude='claude --tools "" --strict-mcp-config --mcp-config ~/.claude/mcp.json'
+export ENABLE_CLAUDEAI_MCP_SERVERS=false
 
-alias claude='claude --tools "" --strict-mcp-config'
+#claude mcp add --transport http --scope user secure-api http://127.0.0.1:9000/mcp
+
+
 
 #claude --tools "" --strict-mcp-config --mcp-config ./mcp.json
+# TODO: Consider using distroless style
+
+FROM alpine:3.20 AS build
+RUN apk add --no-cache bash curl ca-certificates libgcc libstdc++
+RUN adduser -D claude
+USER claude
+RUN curl -fsSL https://claude.ai/install.sh | bash -s 2.1.89
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates libgcc libstdc++
+RUN adduser -D claude
+COPY --from=build --chown=claude:claude /home/claude/.local /home/claude/.local
+# COPY --chown=claude:claude settings.json /home/claude/.claude/settings.json
+USER claude
+ENV PATH="/home/claude/.local/bin:${PATH}" \
+    DISABLE_AUTOUPDATER=1 \
+    ENABLE_CLAUDEAI_MCP_SERVERS=false
+# May require USE_BUILTIN_RIGGREP and ripgrep.
+WORKDIR /workspace
+ENTRYPOINT ["claude"]
+
+settings.json:
+
+{
+    "permissions": {
+        "deny": ["Bash", "Edit", "Write", "NotebookEdit", "Read", "Grep", "Glob", "WebFetch", "WebSearch"]
+    }
+}
