@@ -16,6 +16,8 @@ dependencies = [
     "dissect.target",
     "dissect.extfs",
     "dissect.fat",
+    "mcp>=1.9,<2",
+    "asyncssh>=2.14",
     "thirdparty-qemu",
     "thirdparty-dockerfile"
 ]

@@ -21,9 +21,11 @@ def try_stdin():
 
 
 from pathlib import Path
-def run_background_process_logged(pidfile: Path | str, args: list, log_file: Path | str | None = None) -> int:
+def run_background_process_logged(pidfile: Path | str, args: list, log_file: Path | str | None = None, env: dict | None = None) -> int:
     """
     Start process in the background and write its pid to `pidfile`.
+
+    `env`, when given, is the process's entire environment; by default it inherits ours.
 
     Returns the pid of the started process.
     """
@@ -42,6 +44,7 @@ def run_background_process_logged(pidfile: Path | str, args: list, log_file: Pat
 
     proc = subprocess.Popen(
         args,
+        env=env,
         stdout=stdout,
         stderr=stderr,
         stdin=subprocess.DEVNULL,

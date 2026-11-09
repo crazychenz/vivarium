@@ -22,7 +22,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field
 
-# ---- configuration (environment, set by start-vms.sh) ----
+# ---- configuration (environment, set by McpGateway.start in mcpg.py) ----
 BIND = os.environ.get("GATEWAY_BIND", "127.0.0.1")
 PORT = int(os.environ.get("GATEWAY_PORT", "9000"))
 EXEC_HOST = os.environ.get("EXEC_HOST", "127.0.0.1")

@@ -29,7 +29,10 @@ class VivAgentOperator():
 
         from thirdparty.vivarium.operator.vivarium.agent.wgbridge import WireguardBridge
         self.wgbridge = WireguardBridge(self.rig)
-        
+
+        from thirdparty.vivarium.operator.vivarium.agent.mcpg import McpGateway
+        self.mcpg = McpGateway(self.rig)
+
         from thirdparty.vivarium.operator.vivarium.agent.agentvm import AgentVm
         self.agentvm = AgentVm(self)
 
@@ -110,10 +113,22 @@ class VivAgentOperator():
         else:
             log.info(f"qemu-wg-bridge already running")
 
-        # TODO: run mcpg (with tools configured)
         # TODO: run virtiofsd (implicit as part of izba?)
         # TODO: run enclosurevm
         self.enclosurevm.start_vm()
+        self.enclosurevm.wait_ready()
+
+        # mcpg checks SSH to the enclosure VM at startup, and the agent VM connects to mcpg
+        # through guestfwd, so it has to start between the two.
+        if not self.mcpg.is_alive():
+            self.mcpg.start(env={
+                "EXEC_PORT": str(self.enclosurevm.get_ssh_port()),
+                "EXEC_USER": "user",
+                "EXEC_KEY": str(self.enclosurevm.get_ssh_identity()),
+            })
+            self.mcpg.wait_ready()
+        else:
+            log.info(f"mcpg already running")
 
         self.agentvm.start_vm()
 
@@ -129,7 +144,7 @@ class VivAgentOperator():
         print("Killing wgbridge.")
         self.wgbridge.kill()
         print("Killing mcpg.")
-        #self.mcpg.kill()
+        self.mcpg.kill()
         print("Killing mitm.")
         self.mitm.kill()
         print("Killing agentvm.")
@@ -172,6 +187,12 @@ class VivAgentOperator():
             print(f"  alive: {self.wgbridge.is_alive()}")
         except FileNotFoundError:
             print(f"  Not Found")    
+
+        print(f"mcpg")
+        try:
+            print(f"  alive: {self.mcpg.is_alive()}")
+        except FileNotFoundError:
+            print(f"  Not Found")
 
         print(f"agentvm:")
         try:

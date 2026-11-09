@@ -93,3 +93,12 @@ class EnclosureVm():
         izba = self._enclosure_izba
 
         return int((izba.overlay_path / "run" / "ssh_host_port").read_text().strip())
+
+    def get_ssh_identity(self):
+        self._init_with_overlay()
+        return self._enclosure_izba.image_path / "misc" / "ssh" / "id_ed25519"
+
+    def wait_ready(self):
+        self._init_with_overlay()
+        izba = self._enclosure_izba
+        izba.driver.run_ready_wait(izba)
