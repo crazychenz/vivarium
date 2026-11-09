@@ -118,17 +118,20 @@ class VivAgentOperator():
         self.enclosurevm.start_vm()
         self.enclosurevm.wait_ready()
 
-        # mcpg checks SSH to the enclosure VM at startup, and the agent VM connects to mcpg
-        # through guestfwd, so it has to start between the two.
-        if not self.mcpg.is_alive():
-            self.mcpg.start(env={
-                "EXEC_PORT": str(self.enclosurevm.get_ssh_port()),
-                "EXEC_USER": "user",
-                "EXEC_KEY": str(self.enclosurevm.get_ssh_identity()),
-            })
-            self.mcpg.wait_ready()
-        else:
-            log.info(f"mcpg already running")
+        try:
+            # mcpg checks SSH to the enclosure VM at startup, and the agent VM connects to mcpg
+            # through guestfwd, so it has to start between the two.
+            if not self.mcpg.is_alive():
+                self.mcpg.start(env={
+                    "EXEC_PORT": str(self.enclosurevm.get_ssh_port()),
+                    "EXEC_USER": "user",
+                    "EXEC_KEY": str(self.enclosurevm.get_ssh_identity()),
+                })
+                self.mcpg.wait_ready()
+            else:
+                log.info(f"mcpg already running")
+        except RuntimeError as e:
+            print(f"RuntimeError: {e}")
 
         self.agentvm.start_vm()
 
@@ -193,6 +196,8 @@ class VivAgentOperator():
             print(f"  alive: {self.mcpg.is_alive()}")
         except FileNotFoundError:
             print(f"  Not Found")
+        except RuntimeError as e:
+            print(f"  RuntimeError: {e}")
 
         print(f"agentvm:")
         try:

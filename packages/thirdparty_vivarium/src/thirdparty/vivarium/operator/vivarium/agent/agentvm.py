@@ -110,6 +110,7 @@ class AgentVm():
         self._init_with_overlay()
         # TODO: Verify its built?
 
+        # TODO: I think this is a duplicate call.
         self._agent_izba.with_overlay(self._overlay_name)
 
         self.inject_tunnel_network()
@@ -117,12 +118,14 @@ class AgentVm():
         try:
             self._agent_izba.start(exist_ok=True, callbacks=self.callbacks)
         except FileExistsError:
+            print("AgentVM already running.")
             pass
         except:
             raise
 
         # TODO: Import the container image.
         with open(self.path / "agent-oci.tar") as agent_oci:
+            print("Loading agent OCI into AgentVM")
             self._agent_izba.exec(user='user', command=['docker', 'load'], stdin=agent_oci)
 
         self.start_mcp_tunnel()
@@ -135,6 +138,7 @@ class AgentVm():
         self._init_with_overlay()
 
         self.kill_mcp_tunnel()
+        # TODO: I think this with_overlay is a duplicate call.
         self._agent_izba.with_overlay(self._overlay_name).stop()
 
     def start_mcp_tunnel(self):
