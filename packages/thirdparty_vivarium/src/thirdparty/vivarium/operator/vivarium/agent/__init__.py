@@ -161,10 +161,31 @@ class VivAgentOperator():
 
         self._init_components()
 
-        print(f"mitm alive: {self.mitm.is_alive()}")
-        print(f"wgbridge alive: {self.wgbridge.is_alive()}")
-        print(f"agentvm alive: {self.agentvm.is_alive()}")
-        print(f"enclosurevm alive: {self.enclosurevm.is_alive()}")
+        print(f"mitm")
+        try:
+            print(f"  alive: {self.mitm.is_alive()}")
+        except FileNotFoundError:
+            print(f"  Not Found")    
+
+        print(f"wgbridge")
+        try:
+            print(f"  alive: {self.wgbridge.is_alive()}")
+        except FileNotFoundError:
+            print(f"  Not Found")    
+
+        print(f"agentvm:")
+        try:
+            print(f"  alive: {self.agentvm.is_alive()}")
+            print(f"  ssh_port: {self.agentvm.get_ssh_port()}")
+        except FileNotFoundError:
+            print(f"  Not Found")
+
+        print(f"enclosurevm:")
+        try:
+            print(f"  alive: {self.enclosurevm.is_alive()}")
+            print(f"  ssh_port: {self.enclosurevm.get_ssh_port()}")
+        except FileNotFoundError:
+            print(f"  Not Found")
         
 
         # TODO: running status (what is up/down, memory consumption, CPU/IO rates, load)

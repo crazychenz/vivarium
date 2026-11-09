@@ -1,4 +1,4 @@
-HOST="http://<gateway-address>:<port>"
+HOST="http://127.0.0.1:9000"
 
 # 1. Initialize — capture the session ID from the response header
 resp=$(curl -s -i -X POST "$HOST/mcp" \
@@ -43,3 +43,58 @@ curl -s -X POST "$HOST/mcp" \
       }
     }
   }'
+
+exit 0
+
+{
+  "mcpServers": {
+    "secure-api": {
+      "type": "http",
+      "url": "https://api.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${API_KEY}"
+      }
+    }
+  }
+}
+
+# ~/.claude/settings.json
+# { "disableClaudeAiConnectors": true }
+# export ENABLE_CLAUDEAI_MCP_SERVERS=false
+
+scp -P 2225 \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR \
+  -i ./venv/vivarium/rigs/agent/izba/images/by_name/agent/misc/ssh/id_ed25519 \
+  claude-config.tar user@127.0.0.1:/home/user/claude-config.tar
+
+# TODO: Set GatewayPorts
+
+GUEST_LISTEN_ENDPT=127.0.0.1:9000
+HOST_CLIENT_ENDPT=127.0.0.1:9000
+ssh -N -p 2225 \
+  -R $GUEST_LISTEN_ENDPT:$HOST_CLIENT_ENDPT \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=15 \
+  -o ForwardAgent=no \
+  -i ./venv/vivarium/rigs/agent/izba/images/by_name/agent/misc/ssh/id_ed25519 \
+  user@127.0.0.1
+
+curl http://127.0.0.1:9000/mcp
+
+viv -v rig izba agent exec agent
+
+tar -xf claude-config.tar
+
+# --network host required for sshd -R w/ "GatewayPorts no"
+docker run -ti --rm --network host -u $(id -u):$(id -g) -v "$HOME/claude-config":/home/node/.claude --entrypoint /bin/bash agent
+
+claude mcp add --transport http --scope user secure-api http://127.0.0.1:9000/mcp
+
+alias claude='claude --tools "" --strict-mcp-config'
+
+#claude --tools "" --strict-mcp-config --mcp-config ./mcp.json

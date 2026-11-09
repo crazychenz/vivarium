@@ -28,6 +28,19 @@ class AgentVm():
             tun_qemu_side = vm_path / "run" / "tun_qemu_side.sock"
             tun_bridge_side = vm_path / "run" / "tun_bridge_side.sock"
 
+            # Add guestfwd for mcp access
+            for netdev in qemu_cmd_obj.netdevs:
+                if netdev.id=='mgmt':
+                    # TODO: Change server to different subnet. (Requires changing interface to associated subnet.)
+                    guestfwd_entry = qapi.GuestFwd(server="10.0.2.100", port=9000, target="tcp:127.0.0.1:9000")
+                    # ! Tighten up with: netdev.restrict=True
+                    if not netdev.guestfwd:
+                        netdev.guestfwd=[guestfwd_entry]
+                    else:
+                        netdev.guestfwd.append(guestfwd_entry)          
+
+            # Add tunnel for model access
+            # ! TODO: Use the tunnel.
             qemu_cmd_obj.netdevs.append(
                 qapi.NetdevDgram(
                     id="tunnel",
@@ -122,3 +135,9 @@ class AgentVm():
 
         izba = self._agent_izba
         return izba.driver.izba_is_running(izba, izba.overlay_path)
+    
+    def get_ssh_port(self):
+        self._init_with_overlay()
+        izba = self._agent_izba
+
+        return int((izba.overlay_path / "run" / "ssh_host_port").read_text().strip())

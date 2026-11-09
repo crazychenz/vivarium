@@ -13,6 +13,7 @@ import posixpath
 import secrets
 import shlex
 import stat
+import sys
 import time
 from typing import Annotated, Awaitable, Callable
 
@@ -28,7 +29,8 @@ EXEC_HOST = os.environ.get("EXEC_HOST", "127.0.0.1")
 EXEC_PORT = int(os.environ.get("EXEC_PORT", "2222"))
 EXEC_USER = os.environ.get("EXEC_USER", "agent")
 EXEC_KEY = os.environ["EXEC_KEY"]
-EXEC_KNOWN_HOSTS = os.environ["EXEC_KNOWN_HOSTS"]
+EXEC_KEY_PASSPHRASE = os.environ.get("EXEC_KEY_PASSPHRASE") or None  # unset/empty: key isn't encrypted
+EXEC_KNOWN_HOSTS = os.environ.get("EXEC_KNOWN_HOSTS") or None  # unset/empty: accept any host key
 AUDIT_LOG = os.environ.get("AUDIT_LOG", "gateway-audit.jsonl")
 WORKDIR = os.environ.get("WORKSPACE_DIR", "/workspace")
 
@@ -50,17 +52,35 @@ mcp = FastMCP(
 
 
 # ---------------------------------------------------------------- plumbing
+async def connect() -> asyncssh.SSHClientConnection:
+    return await asyncssh.connect(
+        EXEC_HOST, EXEC_PORT, username=EXEC_USER,
+        client_keys=[EXEC_KEY], passphrase=EXEC_KEY_PASSPHRASE, known_hosts=EXEC_KNOWN_HOSTS,
+        # Explicit values for every option that would otherwise default to the current user's ~/.ssh or credentials.
+        agent_path=None, config=[], gss_host=None, x509_trusted_certs=None, x509_trusted_cert_paths=[],
+        keepalive_interval=15, connect_timeout=15,
+    )
+
+
 async def conn() -> asyncssh.SSHClientConnection:
     global _conn
     async with _conn_lock:
         if _conn is None or _conn.is_closed():
-            _conn = await asyncssh.connect(
-                EXEC_HOST, EXEC_PORT, username=EXEC_USER,
-                client_keys=[EXEC_KEY], known_hosts=EXEC_KNOWN_HOSTS,
-                agent_path=None, config=[], keepalive_interval=15,
-                connect_timeout=15,
-            )
+            _conn = await connect()
         return _conn
+
+
+async def verify_exec() -> str | None:
+    """Run `true` over SSH with the configured settings; return the reason on failure.
+
+    Uses its own connection: the server runs in a different event loop, so this one can't be kept.
+    """
+    try:
+        async with await connect() as c:
+            r = await c.run("true", check=False, stdin=asyncssh.DEVNULL, timeout=15)
+    except (asyncssh.Error, OSError, ValueError, asyncio.TimeoutError) as e:
+        return f"{type(e).__name__}: {e}"
+    return None if r.exit_status == 0 else f"`true` exited with status {r.exit_status}"
 
 
 def audit(tool: str, args: dict, ok: bool, ms: int, detail: str = "") -> None:
@@ -279,4 +299,7 @@ async def grep(
 
 
 if __name__ == "__main__":
+    if err := asyncio.run(verify_exec()):
+        sys.exit(f"mcp-gateway: cannot reach {EXEC_USER}@{EXEC_HOST}:{EXEC_PORT} "
+                 f"(EXEC_KEY={EXEC_KEY}, EXEC_KNOWN_HOSTS={EXEC_KNOWN_HOSTS}): {err}")
     mcp.run(transport="streamable-http")

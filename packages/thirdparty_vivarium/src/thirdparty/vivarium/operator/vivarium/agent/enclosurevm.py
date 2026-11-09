@@ -87,3 +87,9 @@ class EnclosureVm():
 
         izba = self._enclosure_izba
         return izba.driver.izba_is_running(izba, izba.overlay_path)
+    
+    def get_ssh_port(self):
+        self._init_with_overlay()
+        izba = self._enclosure_izba
+
+        return int((izba.overlay_path / "run" / "ssh_host_port").read_text().strip())
