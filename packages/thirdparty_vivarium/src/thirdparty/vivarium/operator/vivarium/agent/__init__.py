@@ -198,6 +198,7 @@ class VivAgentOperator():
         try:
             print(f"  alive: {self.agentvm.is_alive()}")
             print(f"  ssh_port: {self.agentvm.get_ssh_port()}")
+            print(f"  mcp_tunnel_alive: {self.agentvm.is_mcp_tunnel_alive()}")
         except FileNotFoundError:
             print(f"  Not Found")
 

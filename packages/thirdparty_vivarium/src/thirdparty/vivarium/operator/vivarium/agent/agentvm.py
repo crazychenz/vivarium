@@ -19,6 +19,10 @@ class AgentVm():
         self._image_name='agent'
         self._overlay_name='agent'
 
+        agent_path = self.operator.rig.rig_path / "agent"
+        self.mcp_tunnel_pidfile_fpath = agent_path / "run" / "ssh-mcp-tunnel.pid"
+        self.mcp_tunnel_logfile_fpath = agent_path / "logs" / "ssh-mcp-tunnel.log"
+
 
     def inject_tunnel_network(self):
         def inject_tunnel_args(driver, izba, qemu_cmd_obj):
@@ -121,6 +125,8 @@ class AgentVm():
         with open(self.path / "agent-oci.tar") as agent_oci:
             self._agent_izba.exec(user='user', command=['docker', 'load'], stdin=agent_oci)
 
+        self.start_mcp_tunnel()
+
         # TODO: Start container image.
 
         log.info("Agent VM started")
@@ -128,7 +134,41 @@ class AgentVm():
     def stop_vm(self):
         self._init_with_overlay()
 
+        self.kill_mcp_tunnel()
         self._agent_izba.with_overlay(self._overlay_name).stop()
+
+    def start_mcp_tunnel(self):
+        """Expose the gateway inside the VM on 127.0.0.1:<mcpg port>."""
+        from thirdparty.izba.subprocess.ssh import start_reverse_tunnel
+        self._init_with_overlay()
+
+        if self.is_mcp_tunnel_alive():
+            log.info("ssh mcp tunnel already running")
+            return
+
+        mcpg = self.operator.mcpg
+        pid = start_reverse_tunnel(
+            self.mcp_tunnel_pidfile_fpath,
+            listen=f"127.0.0.1:{mcpg.port}",
+            target=f"{mcpg.bind}:{mcpg.port}",
+            port=self.get_ssh_port(),
+            identity_fpath=self._agent_izba.image_path / "misc" / "ssh" / "id_ed25519",
+            log_file=self.mcp_tunnel_logfile_fpath,
+        )
+        log.info(f"Started ssh mcp tunnel with pid {pid}")
+
+    def is_mcp_tunnel_alive(self) -> bool:
+        from thirdparty.izba.subprocess import read_pid, is_alive, is_process_with_prefix
+        pid = read_pid(self.mcp_tunnel_pidfile_fpath)
+        if pid is None:
+            return False
+        # The prefix check keeps a stale pidfile from matching a recycled pid.
+        return is_alive(pid) and is_process_with_prefix(pid, "ssh")
+
+    def kill_mcp_tunnel(self):
+        from thirdparty.izba.subprocess import read_pid, pid_shutdown
+        if self.is_mcp_tunnel_alive():
+            pid_shutdown(read_pid(self.mcp_tunnel_pidfile_fpath))
 
     def is_alive(self):
         self._init_with_overlay()

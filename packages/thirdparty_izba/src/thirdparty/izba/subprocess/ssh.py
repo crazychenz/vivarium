@@ -145,3 +145,78 @@ def pidfile_ssh_wait(
         else:
             raise Exception(f"Process no longer exists.")
     raise TimeoutError(f"SSH {destination} port {port} not ready after {timeout}s")
+
+
+def start_reverse_tunnel(
+    pidfile,
+    listen,
+    target,
+    destination="user@127.0.0.1",
+    port=2222,
+    identity_fpath=None,
+    log_file=None,
+    ssh="ssh",
+    known_hosts=False,
+    extra_args=[],
+    timeout: float = 60) -> int:
+    """Run `ssh -f -N -R listen:target` in the background and write its pid to `pidfile`.
+
+    `listen` is host:port on the remote side, `target` is host:port on this side. Returns the
+    pid once the forward is established; raises RuntimeError if it could not be.
+    """
+    import re
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    pidfile = Path(pidfile)
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+
+    # -F none, IdentityAgent and IdentitiesOnly keep the current user's ssh setup out of it.
+    cmd = [ssh, '-F', 'none', '-f', '-N', '-p', f'{port}', '-R', f'{listen}:{target}', *extra_args]
+    if not known_hosts:
+        cmd.extend([
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+        ])
+    cmd.extend([
+        "-o", "LogLevel=ERROR",
+        "-o", "ExitOnForwardFailure=yes",
+        "-o", "ServerAliveInterval=15",
+        "-o", "ForwardAgent=no",
+        "-o", "BatchMode=yes",
+        "-o", "IdentityAgent=none",
+        "-o", "IdentitiesOnly=yes",
+    ])
+    if identity_fpath:
+        cmd.extend(['-i', str(identity_fpath)])
+    if log_file:
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        cmd.extend(['-E', str(log_file)])
+
+    # With -f the ssh we launch exits and a forked child holds the tunnel, so its pid is
+    # useless. Running as a control master lets us ask for the child's pid. The socket is
+    # in a short temporary path because rig paths can exceed the unix socket length limit.
+    with tempfile.TemporaryDirectory(prefix="izba-ssh-") as tmp:
+        control = str(Path(tmp) / "c")
+        log.debug(f"Running: {' '.join(cmd)}")
+        result = subprocess.run(
+            [*cmd, '-M', '-S', control, destination],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"ssh tunnel {listen} -> {target} via {destination}:{port} failed "
+                               f"(exit {result.returncode}): {result.stderr.strip() or f'see {log_file}'}")
+
+        check = subprocess.run(
+            [ssh, '-F', 'none', '-S', control, '-O', 'check', destination],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10,
+        )
+
+    match = re.search(r"pid=(\d+)", check.stderr)
+    if match is None:
+        raise RuntimeError(f"could not determine ssh tunnel pid: {check.stderr.strip()}")
+
+    pid = int(match.group(1))
+    pidfile.write_text(str(pid))
+    return pid
