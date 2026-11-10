@@ -36,6 +36,7 @@ def baseline_empty_config():
         # Consider having a "dotenv" for credentials.
         "base_path": None,
         "rigs_path": None,
+        "socket_base_path": None,
 
         # Apkd has downloads in config. Download overrides in config not advised
         # as a default because we want package updates to include updates to downloads.
@@ -77,6 +78,7 @@ def load_vivarium_config(config_path=None, user_config={}):
 
     config["base_path"] = os.environ.get("VIVARIUM_BASE_PATH", config["base_path"])
     config["rigs_path"] = os.environ.get("VIVARIUM_RIGS_PATH", config["rigs_path"])
+    config["socket_base_path"] = os.environ.get("VIVARIUM_SOCKET_BASE_PATH", config["socket_base_path"])
 
     # User config has priority here, but should never be used in base library.
     config = deep_merge(config, user_config)
@@ -133,3 +135,73 @@ def resolve_rigs_path(config=None):
 
     return Path(implicit_rigs_path(base_path=resolve_base_path(config)))
 
+def implicit_socket_path(uid=None) -> Path:
+    """
+    Return a directory for sockets files.
+
+    Preference implicit order:
+      1. $XDG_RUNTIME_DIR/<app>
+      2. /run/user/<uid>/<app>
+      3. /tmp/<app>-<uid>
+      4. $TMPDIR (or system default) /<app>-<uid>
+    """
+
+    import os
+    import stat
+    import tempfile
+    from pathlib import Path
+
+    SUN_PATH_MAX = 107
+
+    def _check_private_dir(path: Path, uid: int) -> str | None:
+        """Return None if `path` is a usable private directory, else the reason it isn't."""
+        try:
+            st = os.lstat(path)
+        except OSError as e:
+            return f"{e.strerror}"
+        if not stat.S_ISDIR(st.st_mode):
+            return "not a directory or is a symlink"
+        if st.st_uid != uid:
+            return f"owned by uid {st.st_uid}, not {uid}"
+        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            return "writable by group/others"
+        if not os.access(path, os.W_OK | os.X_OK):
+            return "not writable"
+        return None
+
+    if uid is None:
+        uid = os.getuid()
+
+    path = Path(os.environ.get("XDG_RUNTIME_DIR")) / "izba"
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if _check_private_dir(path, uid) is None:
+            return path
+    except OSError as e:
+        pass
+    
+    path = Path("/run") / "user" / f"{uid}" / "izba"
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if _check_private_dir(path, uid) is None:
+            return path
+    except OSError as e:
+        pass
+    
+    path = Path(tempfile.gettempdir()) / f"izba-{uid}"
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if _check_private_dir(path, uid) is None:
+            return path
+    except OSError as e:
+        pass
+
+    raise RuntimeError("no usable socket directory found")
+
+
+def resolve_socket_base_path(config=None):
+    # Assumes config already loaded.
+    if config and "socket_base_path" in config and config["socket_base_path"] is not None:
+        return Path(config["socket_base_path"]).resolve()
+
+    return Path(implicit_socket_path())

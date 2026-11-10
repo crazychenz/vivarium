@@ -102,9 +102,9 @@ class VivAgentOperator():
 
         if not self.wgbridge.is_alive():
             self.wgbridge.start(args=[
-                "-socket", str(self.wgbridge.path / "run" / "bridge.sock"),
+                "-socket", str(self.wgbridge.path / "run" / "tun_bridge.sock"),
                 # TODO: Use the real overlay_path from izba object
-                "-peer", str(self.wgbridge.path / "run" / "qemu.sock"),
+                "-peer", str(self.wgbridge.path / "run" / "tun_qemu.sock"),
                 "-conf", str(self.mitm.config_fpath.parent / "wireguard.conf"),
                 "-endpoint", "127.0.0.1:51820",
                 "-guest-ip", "10.0.0.1",

@@ -92,7 +92,7 @@ class EnclosureVm():
         self._init_with_overlay()
         izba = self._enclosure_izba
 
-        return int((izba.overlay_path / "run" / "ssh_host_port").read_text().strip())
+        return int((izba.run_path / "ssh_host_port").read_text().strip())
 
     def get_ssh_identity(self):
         self._init_with_overlay()

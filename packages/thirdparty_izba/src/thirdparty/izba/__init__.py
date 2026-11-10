@@ -24,6 +24,7 @@ class Izba():
         self.construction_path = cfg.resolve_construction_path(config)
         self.images_path = cfg.resolve_images_path(config)
         self.overlays_path = cfg.resolve_overlays_path(config)
+        self.run_base_path = cfg.resolve_socket_base_path(config)
 
         self.driver = None
         self._with_driver = False
@@ -97,6 +98,9 @@ class Izba():
         self.driver_name = (self.image_path / "driver").read_text().strip()
         self.driver = driver_index.create(self.driver_name)
 
+        self.run_path = self.run_base_path / str(self.imageid.hex)
+        self.run_path.mkdir(mode=0o700, parents=True, exist_ok=True)
+
         self._with_image = True
 
         return self
@@ -128,6 +132,10 @@ class Izba():
         import uuid
         self.image_path = (self.overlay_path / "base").resolve()
         self.imageid = uuid.UUID(self.image_path.name)
+
+        # TODO: Verify overlay name is directory safe?
+        self.run_path = self.run_base_path / f"{self.imageid.hex}-{self.overlay_name}"
+        self.run_path.mkdir(mode=0o700, parents=True, exist_ok=True)
         
         self._with_overlay = True
 
@@ -248,6 +256,8 @@ class Izba():
             (self.build_path / folder).mkdir(parents=True, exist_ok=True)
         (self.build_path / "logs" / "console").mkdir(parents=True, exist_ok=True)
         (self.build_path / "driver").write_text(self.driver_name)
+        self.run_path = self.run_base_path / self.imageid.hex
+        self.run_path.mkdir(mode=0o700, parents=True, exist_ok=True)
 
         # Download the OS, kernel, and initrd
         self.driver.cache_izba_base(self, **opts)
@@ -471,7 +481,7 @@ class Izba():
             raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
         
         # TODO: Do some sanity checks here.
-
+        
         return self.driver.start_izba(self, exist_ok=exist_ok, **opts)
 
 
