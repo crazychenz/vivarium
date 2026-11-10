@@ -5,6 +5,7 @@ import logging
 log = logging.getLogger(__name__)
 
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -39,6 +40,7 @@ def baseline_empty_config():
         "construction_path": None, # IZBA_BASE_PATH / "construction" - in-motion, no-touchy!
         "images_path": None,       # IZBA_BASE_PATH / "images" container-imgage-ish
         "overlays_path": None,     # IZBA_BASE_PATH / "overlays" - container-ish
+        "socket_base_path": None,  # This one should stay None, recommend less than 75 bytes.
 
         "downloads": {
             "linux-x64": {
@@ -96,6 +98,7 @@ def load_izba_config(config_path=None, user_config={}):
     config["construction_path"] = os.environ.get("IZBA_CONSTRUCTION_PATH", config["construction_path"])
     config["images_path"] = os.environ.get("IZBA_IMAGES_PATH", config["images_path"])
     config["overlays_path"] = os.environ.get("IZBA_OVERLAYS_PATH", config["overlays_path"])
+    config["socket_base_path"] = os.environ.get("IZBA_SOCKET_BASE_PATH", config["socket_base_path"])
 
     # User config has priority here, but should never be used in base library.
     config = deep_merge(config, user_config)
@@ -188,5 +191,78 @@ def resolve_overlays_path(config=None):
     return Path(implicit_overlays_path(base_path=resolve_base_path(config)))
 
 
+# Linux sun_path is 108 bytes including the trailing NUL (104 on macOS/BSD).
+# Make sure you have space for path + socket_name. If you make socket name
+# less than 32, you get 75 for path (including slashes).
 
 
+def implicit_socket_path(uid=None) -> Path:
+    """
+    Return a directory for sockets files.
+
+    Preference implicit order:
+      1. $XDG_RUNTIME_DIR/<app>
+      2. /run/user/<uid>/<app>
+      3. /tmp/<app>-<uid>
+      4. $TMPDIR (or system default) /<app>-<uid>
+    """
+
+    import os
+    import stat
+    import tempfile
+    from pathlib import Path
+
+    SUN_PATH_MAX = 107
+
+    def _check_private_dir(path: Path, uid: int) -> str | None:
+        """Return None if `path` is a usable private directory, else the reason it isn't."""
+        try:
+            st = os.lstat(path)
+        except OSError as e:
+            return f"{e.strerror}"
+        if not stat.S_ISDIR(st.st_mode):
+            return "not a directory or is a symlink"
+        if st.st_uid != uid:
+            return f"owned by uid {st.st_uid}, not {uid}"
+        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            return "writable by group/others"
+        if not os.access(path, os.W_OK | os.X_OK):
+            return "not writable"
+        return None
+
+    if uid is None:
+        uid = os.getuid()
+
+    path = Path(os.environ.get("XDG_RUNTIME_DIR")) / "izba"
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if _check_private_dir(path, uid) is None:
+            return path
+    except OSError as e:
+        pass
+    
+    path = Path("/run") / "user" / f"{uid}" / "izba"
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if _check_private_dir(path, uid) is None:
+            return path
+    except OSError as e:
+        pass
+    
+    path = Path(tempfile.gettempdir()) / f"izba-{uid}"
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if _check_private_dir(path, uid) is None:
+            return path
+    except OSError as e:
+        pass
+
+    raise RuntimeError("no usable socket directory found")
+
+
+def resolve_socket_base_path(config=None):
+    # Assumes config already loaded.
+    if config and "socket_base_path" in config and config["socket_base_path"] is not None:
+        return Path(config["socket_base_path"]).resolve()
+
+    return Path(implicit_socket_path())
