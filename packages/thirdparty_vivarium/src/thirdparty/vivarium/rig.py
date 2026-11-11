@@ -16,6 +16,10 @@ class Rig():
         # Vivarium's rigs path
         self.rigs_path = cfg.resolve_rigs_path(config)
 
+        self.cache_path = cfg.resolve_cache_path(config)
+        self.download_path = self.cache_path / "downloads"
+        self.download_path.mkdir(parents=True, exist_ok=True)
+
         self._with_operator = False
         self._with_rig = False
 

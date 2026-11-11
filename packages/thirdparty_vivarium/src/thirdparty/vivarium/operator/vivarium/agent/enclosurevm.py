@@ -16,15 +16,15 @@ class EnclosureVm():
         self.operator = operator
         self._driver_name='crt'
         # Note: We need to create a new image so we don't have to match the hardware from crt.
-        self._image_name='enclosure'
-        self._overlay_name='enclosure'
+        self._image_name='enclosurevm'
+        self._overlay_name='enclosurevm'
 
 
     def _init_with_overlay(self):
         if hasattr(self, '_enclosure_izba'):
             return
 
-        self._izba_config = load_izba_config(user_config={"base_path": self.operator.rig.izba_path})
+        self._izba_config = load_izba_config(user_config=self.operator.izba_config_overrides)
         self._enclosure_izba = Izba(self._izba_config)
         self._enclosure_izba.with_overlay(overlay=self._overlay_name)
         self.path = self.operator.rig.rig_path / "enclosure"
@@ -33,7 +33,7 @@ class EnclosureVm():
     def build_vm(self):
         
         # izba_path not set until here for build (i.e. can't do it in __init__).
-        self._izba_config = load_izba_config(user_config={"base_path": self.operator.rig.izba_path})
+        self._izba_config = load_izba_config(user_config=self.operator.izba_config_overrides)
         self._enclosure_izba = Izba(self._izba_config)
         self._enclosure_izba.with_driver(driver=self._driver_name)
 

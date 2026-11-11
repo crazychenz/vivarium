@@ -69,9 +69,10 @@ mitmproxy_config_yaml_indented = '''
 class MitmProxy():
     # *Note: Do not store deployment ref in class, we do not want 
     # *bi-directional linkage between vivarium these classes.
-    def __init__(self, rig : "Rig", name: str = 'default'):
+    def __init__(self, operator, name: str = 'default'):
         
-        self.path = rig.rig_path / 'mitm' / name
+        self.operator = operator
+        self.path = self.operator.rig.rig_path / 'mitm' / name
 
         # keys for ssh keys and certs
         # run for sockets and pid files

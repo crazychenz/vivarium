@@ -24,14 +24,19 @@ class VivAgentOperator():
         if hasattr(self, 'mitm'):
             return
         
+        self.izba_config_overrides = {
+            "base_path": self.rig.izba_path,
+            "cache_path": self.rig.cache_path,
+        }
+
         from thirdparty.vivarium.operator.vivarium.agent.mitmproxy import MitmProxy
-        self.mitm = MitmProxy(self.rig)
+        self.mitm = MitmProxy(self)
 
         from thirdparty.vivarium.operator.vivarium.agent.wgbridge import WireguardBridge
-        self.wgbridge = WireguardBridge(self.rig)
+        self.wgbridge = WireguardBridge(self)
 
         from thirdparty.vivarium.operator.vivarium.agent.mcpg import McpGateway
-        self.mcpg = McpGateway(self.rig)
+        self.mcpg = McpGateway(self)
 
         from thirdparty.vivarium.operator.vivarium.agent.agentvm import AgentVm
         self.agentvm = AgentVm(self)

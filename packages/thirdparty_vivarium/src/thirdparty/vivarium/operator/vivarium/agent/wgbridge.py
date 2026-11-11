@@ -7,8 +7,9 @@ log = logging.getLogger(__name__)
 class WireguardBridge():
     # *Note: Do not store deployment ref in class, we do not want 
     # *bi-directional linkage between vivarium these classes.
-    def __init__(self, rig : "Rig", name: str = 'default'):
-        self.rig = rig
+    def __init__(self, operator, name: str = 'default'):
+        self.operator = operator
+        self.rig = self.operator.rig
         self.path = self.rig.rig_path / 'wgbridge' / name
 
         # keys for ssh keys and certs

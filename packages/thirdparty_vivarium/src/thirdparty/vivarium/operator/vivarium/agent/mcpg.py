@@ -10,8 +10,9 @@ from pathlib import Path
 class McpGateway():
     # *Note: Do not store deployment ref in class, we do not want
     # *bi-directional linkage between vivarium these classes.
-    def __init__(self, rig : "Rig", name: str = 'default', bind: str = '127.0.0.1', port: int = 9000):
-        self.path = rig.rig_path / 'mcpg' / name
+    def __init__(self, operator, name: str = 'default', bind: str = '127.0.0.1', port: int = 9000):
+        self.operator = operator
+        self.path = self.operator.rig.rig_path / 'mcpg' / name
         self.bind = bind
         self.port = port
 

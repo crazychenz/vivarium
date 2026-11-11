@@ -16,15 +16,17 @@ class AgentVm():
 
         self._driver_name='crt'
         # Note: We need to create a new image so we don't have to match the hardware from crt.
-        self._image_name='agent'
-        self._overlay_name='agent'
+        self._image_name='agentvm'
+        self._overlay_name='agentvm'
 
         agent_path = self.operator.rig.rig_path / "agent"
+        # TODO: Consider using a real socket_path?
         self.mcp_tunnel_pidfile_fpath = agent_path / "run" / "ssh-mcp-tunnel.pid"
         self.mcp_tunnel_logfile_fpath = agent_path / "logs" / "ssh-mcp-tunnel.log"
 
 
     def inject_tunnel_network(self):
+        # TODO: Until we enable the mitm path, this is useless.
         pass
         # def inject_tunnel_args(driver, izba, qemu_cmd):
         #     import thirdparty.qemu.qapi as qapi
@@ -68,7 +70,7 @@ class AgentVm():
         if hasattr(self, '_agent_izba'):
             return
 
-        self._izba_config = load_izba_config(user_config={"base_path": self.operator.rig.izba_path})
+        self._izba_config = load_izba_config(user_config=self.operator.izba_config_overrides)
         self._agent_izba = Izba(self._izba_config)
         self._agent_izba.with_overlay(overlay=self._overlay_name)
         self.path = self.operator.rig.rig_path / "agent"
@@ -77,7 +79,7 @@ class AgentVm():
     def build_vm(self):
         
         # izba_path not set until here for build (i.e. can't do it in __init__).
-        self._izba_config = load_izba_config(user_config={"base_path": self.operator.rig.izba_path})
+        self._izba_config = load_izba_config(user_config=self.operator.izba_config_overrides)
         self._agent_izba = Izba(self._izba_config)
         self._agent_izba.with_driver(driver=self._driver_name)
 

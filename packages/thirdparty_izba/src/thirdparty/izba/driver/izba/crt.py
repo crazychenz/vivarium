@@ -68,12 +68,12 @@ class IzbaCrtDriver():
         
         url = self.cache_platform[self.base_os]['upstream']
         fname = self.cache_platform[self.base_os]['cache']
-        self.base_img_path = izba.base_path / "cache" / "downloads" / fname
+        self.base_img_path = izba.cache_path / "downloads" / fname
+        self.base_img_path.parent.mkdir(parents=True, exist_ok=True)
 
         # download image if not cached
         if not self.base_img_path.exists():
             from thirdparty.izba.download import download_with_progress
-            self.base_img_path.parent.mkdir(parents=True, exist_ok=True)
             download_with_progress(url=url, dest_path=self.base_img_path)
         
         return True

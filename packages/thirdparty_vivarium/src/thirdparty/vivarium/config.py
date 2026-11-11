@@ -36,6 +36,7 @@ def baseline_empty_config():
         # Consider having a "dotenv" for credentials.
         "base_path": None,
         "rigs_path": None,
+        "cache_path": None,
         "socket_base_path": None,
 
         # Apkd has downloads in config. Download overrides in config not advised
@@ -78,6 +79,8 @@ def load_vivarium_config(config_path=None, user_config={}):
 
     config["base_path"] = os.environ.get("VIVARIUM_BASE_PATH", config["base_path"])
     config["rigs_path"] = os.environ.get("VIVARIUM_RIGS_PATH", config["rigs_path"])
+    config["cache_path"] = os.environ.get("VIVARIUM_CACHE_PATH", config["cache_path"])
+
     config["socket_base_path"] = os.environ.get("VIVARIUM_SOCKET_BASE_PATH", config["socket_base_path"])
 
     # User config has priority here, but should never be used in base library.
@@ -116,10 +119,6 @@ def implicit_base_path():
     return base_path.resolve()
 
 
-def implicit_rigs_path(base_path=(Path('.') / "vivarium")):
-    return (Path(base_path) / "rigs").resolve()
-
-
 def resolve_base_path(config=None):
     # Assumes config already loaded.
     if config and "base_path" in config and config["base_path"] is not None:
@@ -128,12 +127,29 @@ def resolve_base_path(config=None):
     return Path(implicit_base_path())
 
 
+def implicit_rigs_path(base_path=(Path('.') / "vivarium")):
+    return (Path(base_path) / "rigs").resolve()
+
+
 def resolve_rigs_path(config=None):
     # Assumes config already loaded.
     if config and "rigs_path" in config and config["rigs_path"] is not None:
         return Path(config["rigs_path"]).resolve()
 
     return Path(implicit_rigs_path(base_path=resolve_base_path(config)))
+
+
+def implicit_cache_path(base_path=(Path('.') / "vivarium")):
+    return (Path(base_path) / "cache").resolve()
+
+
+def resolve_cache_path(config=None):
+    # Assumes config already loaded.
+    if config and "cache_path" in config and config["cache_path"] is not None:
+        return Path(config["cache_path"]).resolve()
+
+    return Path(implicit_cache_path(base_path=resolve_base_path(config)))
+
 
 def implicit_socket_path(uid=None) -> Path:
     """

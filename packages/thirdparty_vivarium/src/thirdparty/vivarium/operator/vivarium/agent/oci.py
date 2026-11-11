@@ -13,7 +13,8 @@ class AgentOciBuilder():
 
         # TODO: How do we set the izba config file as a viv operator configuration?
         from thirdparty.izba.config import load_izba_config
-        izba_config = load_izba_config(user_config={"base_path": self.operator.rig.izba_path})
+        izba_config = load_izba_config(user_config=self.operator.izba_config_overrides)
+        #izba_config = load_izba_config(user_config={"base_path": self.operator.rig.izba_path})
 
         import io
         from thirdparty.izba import Izba
@@ -27,7 +28,7 @@ class AgentOciBuilder():
         # Callback that will attach sparse drive/device to qemu on build-origin and start.
 
         def inject_sparse_device(is_overlay=False):
-            def _inject_sparse_device(driver, izba, qemu_cmd_obj):
+            def _inject_sparse_device(driver, izba, qemu_cmd):
                 if is_overlay:
                     oci_tar_fpath = izba.overlay_path / "images" / "oci.tar"
                 else:
@@ -36,9 +37,9 @@ class AgentOciBuilder():
                 make_file_sparse(oci_tar_fpath)
 
                 import thirdparty.qemu.qapi as qapi
-                qemu_cmd_obj.drives.append(qapi.Drive(id="oci_tar", file=oci_tar_fpath, format="raw", interface="none"))
-                qemu_cmd_obj.devices.append(qapi.VirtioBlk(drive="oci_tar", serial="oci_tar"))
-                return qemu_cmd_obj
+                qemu_cmd._obj.drives.append(qapi.Drive(id="oci_tar", file=oci_tar_fpath, format="raw", interface="none"))
+                qemu_cmd._obj.devices.append(qapi.VirtioBlk(drive="oci_tar", serial="oci_tar"))
+                return qemu_cmd._obj
             return _inject_sparse_device
 
         def inject_user_disk_permission(driver, izba, cc):
