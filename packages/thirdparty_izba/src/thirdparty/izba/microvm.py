@@ -53,6 +53,42 @@ qemu_cmd.add_hostfwd(mgmt, host_port=2222, guest_port=22)
 
 '''
 
+class CommonQemuPaths():
+    def __init__(self, izba):
+
+        self.vm_path = izba.image_path
+        if hasattr(izba, 'overlay_path'):
+            self.vm_path = izba.overlay_path
+        elif hasattr(izba, 'build_path'):
+            self.vm_path = izba.build_path
+
+        self.logs = vm_path / "logs"
+        self.images = vm_path / "images"
+        self.artifacts = vm_path / "artifacts"
+        self.overlay = vm_path / "images" / "overlay.qcow2"
+
+        self.pidfile = izba.run_path / "qemu.pid"
+        self.qmp = izba.run_path / "qemu.qmp"
+        self.ssh_host_port = izba.run_path / "ssh_host_port"
+
+        self.console = self.logs / "console.log"
+        self.stderr_log = self.logs / "qemu-stderr.log"
+        self.debug_log = self.logs / "qemu-debug.log"
+
+        # These come from base image.
+        image_path = izba.image_path
+        if hasattr(izba, 'build_path'):
+            image_path = izba.build_path
+
+        self.kernel = image_path / "images" / "vmlinuz"
+        self.initrd = image_path / "images" / "initrd.img"
+        self.base_image = image_path / "images" / "base-image.qcow2"
+        self.origin = image_path / "images" / "origin-overlay.qcow2"
+        self.seed = image_path / "images" / "seed.iso"
+        self.state = image_path / "images" / "origin-overlay.state"
+        self.identity = image_path / "misc" / "ssh" / "id_ed25519"
+
+
 class QemuMicroVmCommand():
 
     def __init__(self, path_prefix=Path("."), **opts):

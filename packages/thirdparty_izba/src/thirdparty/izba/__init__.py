@@ -21,6 +21,7 @@ class Izba():
         self.config = config
         self.base_path = cfg.resolve_base_path(config)
         self.cache_path = cfg.resolve_cache_path(config)
+        self.downloads_path = self.cache_path / "downloads"
         self.construction_path = cfg.resolve_construction_path(config)
         self.images_path = cfg.resolve_images_path(config)
         self.overlays_path = cfg.resolve_overlays_path(config)
@@ -237,6 +238,7 @@ class Izba():
 
         # TODO: Forbid all tags that look like uuid7.hex
 
+        # ! This isn't correct. It bails on first conflict, why check at all?
         for tag in tags:
             tag_path = self.images_path / "by_name" / tag
             if tag_path.exists():
@@ -259,6 +261,7 @@ class Izba():
         self.run_path = self.run_base_path / self.imageid.hex
         self.run_path.mkdir(mode=0o700, parents=True, exist_ok=True)
 
+        # TODO: Check the returns of all driver calls.
         # Download the OS, kernel, and initrd
         self.driver.cache_izba_base(self, **opts)
         # Build data that could be used by init process

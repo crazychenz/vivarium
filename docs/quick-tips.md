@@ -21,4 +21,5 @@ viv rig izba agentrig stop enclosurevm
 viv rig izba agentrig rm enclosurevm
 viv rig izba agentrig rmi enclosurevm
 viv rig build --name agentrig agent
+viv rig run agentrig
 ```

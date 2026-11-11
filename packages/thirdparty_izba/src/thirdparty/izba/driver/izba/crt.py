@@ -198,10 +198,6 @@ class IzbaCrtDriver():
         tunnel = qemu_cmd.add_dgram_netdev(izba.run_path / "tun_qemu.sock", izba.run_path / "tun_bridge.sock")
         #qemu_cmd.sandbox()
 
-        ### Arguments too long if we don't change folders and use relative paths.
-        ##from thirdparty.izba.subprocess import workdir
-        ##with workdir(izba.build_path):
-
         if qemu_cmd_cb:
             qemu_cmd_cb(self, izba, qemu_cmd)
 
@@ -296,21 +292,6 @@ class IzbaCrtDriver():
         qemu_cmd.add_9p_share(izba.build_path / "mnt", mount_tag="host")
         #qemu_cmd.sandbox()
 
-        ### Arguments too long if we don't change folders and use relative paths.
-        ##from thirdparty.izba.subprocess import workdir
-        ##with workdir(izba.build_path):
-
-        
-        ### --- diagnostics for the VM state save below ---
-        ### With a log file and log items, QEMU should not point the daemon's stderr
-        ### (error_report) at /dev/null; the trace events record which vmstate section
-        ### a failed save died in (needs the "log" trace backend, the default).
-        ##msg_timestamp=True,
-        ##log=["guest_errors"],
-        ##logfile=qemu_debug_fpath.relative_to(izba.build_path),
-        ##trace=["savevm_*", "vmstate_save*", "migration_completion*", "migrate_set_state",
-        ##        "qio_channel_file*"],
-
         if qemu_cmd_cb:
             qemu_cmd_cb(self, izba, qemu_cmd)
 
@@ -351,51 +332,33 @@ class IzbaCrtDriver():
             # Never leave a stale state file that could be paired with the new overlay.
             state_fpath.unlink(missing_ok=True)
             qemu_pid = read_pid(pidfile_fpath)
-            # * diag_fpath = Path("logs") / f"qemu-diagnostics-{int(time.time())}.txt"
+            
             migrate_error = None
-            # * graph_before = None
+            
             # Relative: an absolute path can exceed the AF_UNIX path limit (~108 bytes).
             with qmp.QmpClient(qmp_fpath) as mon:
                 try:
                     mon.execute(qmp.Stop())
-                    # Kept for diagnostics: migration completion inactivates every block
-                    # node, which fails if some edge still holds write permission.
-                    # * try:
-                    # *     graph_before = mon.execute(qmp.XDebugQueryBlockGraph())
-                    # * except Exception as e:
-                    # *     graph_before = f"<failed: {type(e).__name__}: {e}>"
                     mon.execute(qmp.Migrate(uri=f"file:{state_fpath}"))
                     info = mon.wait_migration()
                     ram_bytes = info.ram.transferred if info.ram else "?"
                     log.info(f"Saved VM state to {state_fpath} ({ram_bytes} bytes RAM transferred)")
                 except Exception as e:
                     migrate_error = e
-                    # While QEMU is still up: its view of the VM and of the failed migration.
-                    # * _write_qmp_diagnostics(diag_fpath, mon, qemu_pid, qemu_cmd_obj, migrate_error,
-                    # *                         graph_before)
                 finally:
-                    # quit flushes and closes the images; with the guest still paused this
-                    # is safe whether or not the migration succeeded.
                     mon.execute(qmp.Quit())
             exited = qemu_pid is None or wait_for_exit(qemu_pid, timeout=60)
             if migrate_error is not None:
-                # * # After exit, so QEMU's stderr and trace log are complete.
-                # * _append_host_diagnostics(diag_fpath, qemu_cmd_obj, state_fpath,
-                # *                             [qemu_stderr_fpath, qemu_debug_fpath])
                 state_fpath.unlink(missing_ok=True)
-                # * log.debug(diag_fpath.read_text())
-                # * log.debug(f"QEMU diagnostics written to {diag_fpath.resolve()}")
                 raise migrate_error
             if not exited:
                 raise RuntimeError(f"QEMU (pid {qemu_pid}) did not exit after QMP quit")
-
 
         except Exception as e:
             # TODO: Unlink golden image.
             log.error(f"Error: {e}")
             import traceback
             traceback.print_exc()
-            # breakpoint()
 
 
     # Runs the VM and shuts down when complete.
@@ -536,12 +499,10 @@ class IzbaCrtDriver():
             raise FileNotFoundError(f"No saved VM state at {state_fpath}. Run build first.")
         qemu_cmd.set_incoming(state_fpath)
 
-        
-
         mgmt = qemu_cmd.add_user_netdev(restrict=False)
         qemu_cmd.add_hostfwd(mgmt, host_port=ssh_host_port, guest_port=22)
         tunnel = qemu_cmd.add_dgram_netdev(izba.run_path / "tun_qemu.sock", izba.run_path / "tun_bridge.sock")
-        qemu_cmd.add_9p_share(izba.build_path / "mnt", mount_tag="host")
+        qemu_cmd.add_9p_share(izba.image_path / "mnt", mount_tag="host")
         #qemu_cmd.sandbox()
 
         ### Arguments too long if we don't change folders and use relative paths.
@@ -707,14 +668,6 @@ class IzbaCrtDriver():
         pidfile_ssh_wait(pidfile=pidfile_fpath, port=ssh_host_port, identity_fpath=identity_fpath)
 
 
-    # Starts VM, runs a single script, shuts down VM.
-    def run_instance_vm(self, izba):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        # print(f"base_path: {izba.base_path}")
-        # print(f"profiles_path: {izba.profiles_path}")
-        # raise NotImplementedError()
-
-
     def _build_base_cloud_config(self, izba, reboot : bool = True):
         import shlex
         import thirdparty.qemu.cloud_init.cloud_config as cc
@@ -749,9 +702,11 @@ class IzbaCrtDriver():
                     shell="/bin/bash",
                     groups=[
                         "docker",
+                        "sudo",
                         # CAUTION: "sudo",
                     ],
                     # CAUTION: sudo="ALL=(ALL) NOPASSWD:ALL",
+                    sudo="ALL=(ALL) NOPASSWD:ALL",
                     ssh_authorized_keys=[open(izba.build_path / "misc" / "ssh" / "id_ed25519.pub").read()],
                     lock_passwd=True,
                     # CAUTION: lock_passwd=False,
@@ -933,151 +888,3 @@ class IzbaCrtDriver():
     #         ],
     #         power_state=power_state,
     #     )
-
-
-def _diag_section(out, title, produce):
-    """Write one titled section; a failing probe records its error instead of aborting the dump."""
-    import json
-    out.write(f"\n===== {title} =====\n")
-    try:
-        value = produce()
-    except Exception as e:
-        value = f"<failed: {type(e).__name__}: {e}>"
-    if hasattr(value, "model_dump"):
-        value = value.model_dump(mode="json", by_alias=True)
-    if not isinstance(value, str):
-        value = json.dumps(value, indent=2, default=str)
-    out.write(value.rstrip("\n") + "\n")
-
-
-def _format_block_graph(graph):
-    """x-debug-query-block-graph as one line per edge, so the edge still holding write is easy to spot."""
-    if not isinstance(graph, dict):
-        return graph
-    nodes = {n["id"]: f'{n["type"]}:{n["name"] or "<anonymous>"}' for n in graph["nodes"]}
-    lines = [f"nodes: {', '.join(sorted(nodes.values()))}", ""]
-    for e in graph["edges"]:
-        lines.append(f'{nodes[e["parent"]]} --{e["name"]}--> {nodes[e["child"]]}\n'
-                     f'    perm={",".join(e["perm"]) or "-"}  shared={",".join(e["shared-perm"]) or "-"}')
-    return "\n".join(lines)
-
-
-def _probe_block_inactivation(mon, graph):
-    """Inactivate block-driver nodes one at a time, parents first, recording QEMU's answer for
-    each, then reactivate everything. Shows which node migration's bdrv_inactivate_all() trips on."""
-    from thirdparty.qemu.qapi import qmp
-
-    names = {n["id"]: n["name"] for n in graph["nodes"] if n["type"] == "block-driver"}
-    parents = {i: [e["parent"] for e in graph["edges"] if e["child"] == i and e["parent"] in names]
-               for i in names}
-    results, done = [], set()
-    while len(done) < len(names):
-        ready = [i for i in names if i not in done and all(p in done for p in parents[i])]
-        if not ready:
-            # Everything left sits below a node that failed to inactivate.
-            results += [f"{names[i]}: skipped (parent not inactive)" for i in names if i not in done]
-            break
-        for i in ready:
-            done.add(i)
-            try:
-                mon.execute(qmp.BlockdevSetActive(node_name=names[i], active=False))
-                results.append(f"{names[i]}: inactivated")
-            except Exception as e:
-                results.append(f"{names[i]}: FAILED {e}")
-                # Leave its children out: they would only report the active parent.
-                done.update(c for c in names if i in parents[c])
-    try:
-        mon.execute(qmp.BlockdevSetActive(active=True))
-        results.append("reactivate all: ok")
-    except Exception as e:
-        results.append(f"reactivate all: FAILED {e}")
-    return "\n".join(results)
-
-
-def _write_qmp_diagnostics(diag_fpath, mon, qemu_pid, qemu_cmd_obj, error, graph_before=None):
-    """Dump QEMU's state over QMP after a failed VM state save, while QEMU is still running."""
-    import traceback
-    from pathlib import Path
-    from thirdparty.qemu.qapi import qmp
-
-    hmp = lambda line: lambda: mon.execute(qmp.HumanMonitorCommand(command_line=line))
-    proc = Path("/proc") / str(qemu_pid)
-    with open(diag_fpath, "w") as out:
-        _diag_section(out, "error", lambda: "".join(traceback.format_exception(error)))
-        _diag_section(out, "qemu command", qemu_cmd_obj.to_shell)
-        _diag_section(out, "query-version", lambda: mon.execute(qmp.QueryVersion()))
-        _diag_section(out, "query-kvm", lambda: mon.execute(qmp.QueryKvm()))
-        _diag_section(out, "query-current-machine", lambda: mon.execute(qmp.QueryCurrentMachine()))
-        _diag_section(out, "query-status", lambda: mon.execute(qmp.QueryStatus()))
-        _diag_section(out, "query-migrate", lambda: mon.execute(qmp.QueryMigrate()))
-        _diag_section(out, "query-migrate-capabilities", lambda: mon.execute(qmp.QueryMigrateCapabilities()))
-        _diag_section(out, "query-migrate-parameters", lambda: mon.execute(qmp.QueryMigrateParameters()))
-        _diag_section(out, "query-block", lambda: [b.model_dump(mode="json", by_alias=True)
-                                                   for b in mon.execute(qmp.QueryBlock())])
-        _diag_section(out, "block graph before migrate", lambda: _format_block_graph(graph_before))
-        try:
-            graph_after = mon.execute(qmp.XDebugQueryBlockGraph())
-        except Exception as e:
-            graph_after = f"<failed: {type(e).__name__}: {e}>"
-        _diag_section(out, "block graph after failure", lambda: _format_block_graph(graph_after))
-        _diag_section(out, "query-named-block-nodes (flat)",
-                      lambda: [{k: n.get(k) for k in ("node-name", "drv", "file", "ro", "active")}
-                               for n in mon.execute(qmp.QueryNamedBlockNodes(flat=True))])
-        _diag_section(out, "per-node inactivation probe", lambda: _probe_block_inactivation(mon, graph_after))
-        _diag_section(out, "block graph after probe",
-                      lambda: _format_block_graph(mon.execute(qmp.XDebugQueryBlockGraph())))
-        _diag_section(out, "QMP events received", lambda: mon.events)
-        # "Bad address" (EFAULT) is either a write from a bad buffer (RAM blocks/memory map)
-        # or a failing KVM ioctl while saving a device (qtree lists what gets saved).
-        for line in ("info migrate", "info ramblock", "info mtree -f", "info qtree", "info cpus",
-                     "info irq", "info pic"):
-            _diag_section(out, f"HMP {line}", hmp(line))
-        _diag_section(out, f"/proc/{qemu_pid}/status (Seccomp, memory locking)",
-                      lambda: (proc / "status").read_text())
-        _diag_section(out, f"/proc/{qemu_pid}/limits", lambda: (proc / "limits").read_text())
-        _diag_section(out, f"/proc/{qemu_pid}/fd", lambda: "\n".join(
-            f"{fd.name} -> {fd.readlink()}" for fd in sorted((proc / "fd").iterdir(), key=lambda p: int(p.name))))
-
-
-def _append_host_diagnostics(diag_fpath, qemu_cmd_obj, state_fpath, log_fpaths, tail_lines=300):
-    """Append host-side facts and QEMU's own logs, after QEMU has exited."""
-    import platform
-    import resource
-    import shutil
-    import subprocess
-
-    def run(*args):
-        r = subprocess.run(args, capture_output=True, text=True, timeout=30)
-        return f"$ {' '.join(args)}  (rc={r.returncode})\n{r.stdout}{r.stderr}"
-
-    def tail(fpath):
-        lines = fpath.read_text(errors="replace").splitlines()
-        return f"({len(lines)} lines, showing last {tail_lines})\n" + "\n".join(lines[-tail_lines:])
-
-    def kernel_log():
-        # KVM, seccomp and audit messages explain many EFAULT/EPERM failures.
-        try:
-            text = run("dmesg", "--ctime")
-        except Exception:
-            text = run("journalctl", "-k", "-n", "300", "--no-pager")
-        keep = [l for l in text.splitlines() if any(k in l.lower() for k in
-                ("kvm", "qemu", "seccomp", "audit", "segfault", "oom", "$ "))]
-        return "\n".join(keep[-tail_lines:])
-
-    with open(diag_fpath, "a") as out:
-        _diag_section(out, "qemu binary version", lambda: run(qemu_cmd_obj.binary, "--version"))
-        _diag_section(out, "host", lambda: {
-            "uname": platform.uname()._asdict(),
-            "RLIMIT_FSIZE": resource.getrlimit(resource.RLIMIT_FSIZE),
-            "RLIMIT_MEMLOCK": resource.getrlimit(resource.RLIMIT_MEMLOCK),
-        })
-        _diag_section(out, "state file", lambda: {
-            "path": str(state_fpath),
-            "exists": state_fpath.exists(),
-            "size": state_fpath.stat().st_size if state_fpath.exists() else None,
-            "fs_free_bytes": shutil.disk_usage(state_fpath.parent).free,
-            "fs": run("stat", "-f", "-c", "%T", str(state_fpath.parent)).strip(),
-        })
-        for fpath in log_fpaths:
-            _diag_section(out, f"{fpath} (tail)", lambda fpath=fpath: tail(fpath))
-        _diag_section(out, "kernel log (kvm/qemu/seccomp/audit lines)", kernel_log)

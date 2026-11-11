@@ -55,7 +55,7 @@ class EnclosureVm():
         try:
             # ! TODO: Tighten this up.
             self._enclosure_izba.create(name=self._overlay_name, network='slirp', user='user', exist_ok=True)
-            log.info("Created agent izba overlay.")
+            log.info("Created enclosure izba overlay.")
         except FileExistsError:
             pass
         except:
