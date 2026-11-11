@@ -290,7 +290,10 @@ class IzbaCrtDriver():
         qemu_cmd.add_raw_disk(images_fpath / "seed.iso")
         mgmt = qemu_cmd.add_user_netdev(restrict=False)
         qemu_cmd.add_hostfwd(mgmt, host_port=ssh_host_port, guest_port=22)
+        # TODO: This tunnel is only for agent.
         tunnel = qemu_cmd.add_dgram_netdev(izba.run_path / "tun_qemu.sock", izba.run_path / "tun_bridge.sock")
+        # TODO: This 9p share is only for enclosurevm
+        qemu_cmd.add_9p_share(izba.build_path / "mnt", mount_tag="host")
         #qemu_cmd.sandbox()
 
         ### Arguments too long if we don't change folders and use relative paths.
@@ -538,7 +541,7 @@ class IzbaCrtDriver():
         mgmt = qemu_cmd.add_user_netdev(restrict=False)
         qemu_cmd.add_hostfwd(mgmt, host_port=ssh_host_port, guest_port=22)
         tunnel = qemu_cmd.add_dgram_netdev(izba.run_path / "tun_qemu.sock", izba.run_path / "tun_bridge.sock")
-        
+        qemu_cmd.add_9p_share(izba.build_path / "mnt", mount_tag="host")
         #qemu_cmd.sandbox()
 
         ### Arguments too long if we don't change folders and use relative paths.

@@ -78,7 +78,8 @@ class VivAgentOperator():
 
         # TODO: izba agent VM with VivAgentIzbaOperator operator
         # TODO: Put the container image in the seed for install.
-        self.agentvm.build_vm()
+        if not (self.rig.izba_path / "images" / "by_name" / "agentvm").exists():
+            self.agentvm.build_vm()
 
         # TODO: Consider: ssh user@remote 'podman run --rm "$(podman load -q | sed "s/^Loaded image[s]*: //")"' < image.tar
 
@@ -86,7 +87,8 @@ class VivAgentOperator():
 
         # TODO: izba enclosure VM with VivEnclosureIzbaOperator operator
         # TODO: Put the container image in the seed for install.
-        self.enclosurevm.build_vm()
+        if not (self.rig.izba_path / "images" / "by_name" / "enclosurevm").exists():
+            self.enclosurevm.build_vm()
 
 
     def run(self, **opts):

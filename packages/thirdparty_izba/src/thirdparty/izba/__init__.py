@@ -323,15 +323,25 @@ class Izba():
 
 
     # Remove golden image.
-    def rmi(self, image, force=False, **opts):
+    def rmi(self, force=False, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         import shutil
 
-        self.imageid, self.image_path, self.image_name = self._resolve_image_alias(image)
+        #self.imageid, self.image_path, self.image_name = self._resolve_image_alias(image)
 
         # iterate all overlays and get their image references
         # iterate all image references and get their image ids
+
+        found = []
+        for overlay_path in self.overlays_path.iterdir():
+            image_path = overlay_path / "base"
+            if image_path.exists() and image_path.is_symlink():
+                if image_path.readlink() == self.image_path:
+                    found.append(overlay_path)
+        
+        if len(found) > 0:
+            raise Exception("Can not remove image referenced by overlay.")
 
         db = {}
         for entry in (self.images_path / "by_id").iterdir():
@@ -451,9 +461,9 @@ class Izba():
         # Is it running?
         from thirdparty.izba.subprocess import read_pid
         from thirdparty.izba.subprocess.qemu import is_qemu_process
-        pid = read_pid(root / "run" / "instance.pid")
+        pid = read_pid(self.run_path / "qemu.pid")
         if pid is not None and is_qemu_process(pid):
-            print(f"Refusing: {root.parent.name}/{root.name} is running (pid {pid}). Stop it first.")
+            print(f"Refusing: {self.overlay_name} is running (pid {pid}). Stop it first.")
             return False
 
         if not force:

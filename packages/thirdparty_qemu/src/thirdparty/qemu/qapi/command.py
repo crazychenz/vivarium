@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .block import Drive
 from .chardev import AnyChardev, CharSpec, render_charspec
 from .device import AnyDevice
+from .fsdev import Fsdev
 from .machine import Accel, Boot, Cpu, Display, Machine, Memory, MicroVM, Rtc, Sandbox, Smp
 from .net import AnyNetdev
 from .objects import AnyObject
@@ -25,7 +26,7 @@ class QemuCommand(BaseModel):
     """A QEMU system emulator invocation.
 
     Options render in a fixed order: machine and boot setup, then backends (objects,
-    chardevs, drives, netdevs), then frontends (``devices``, in list order, which decides
+    chardevs, drives, netdevs, fsdevs), then frontends (``devices``, in list order, which decides
     e.g. virtio-mmio slot assignment on microvm), then process control, then ``extra_args``.
     """
 
@@ -69,6 +70,7 @@ class QemuCommand(BaseModel):
     chardevs: list[AnyChardev] = Field(default_factory=list)
     drives: list[Drive] = Field(default_factory=list)
     netdevs: list[AnyNetdev] = Field(default_factory=list)
+    fsdevs: list[Fsdev] = Field(default_factory=list)
 
     # Frontends
     devices: list[AnyDevice] = Field(default_factory=list)
@@ -145,6 +147,8 @@ class QemuCommand(BaseModel):
             add("-drive", drive)
         for netdev in self.netdevs:
             add("-netdev", netdev)
+        for fsdev in self.fsdevs:
+            add("-fsdev", fsdev)
         for device in self.devices:
             add("-device", device)
 

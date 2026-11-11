@@ -40,6 +40,7 @@ from .chardev import (
     ChardevRingbuf, ChardevSocket, ChardevStdio,
 )
 from .command import QemuCommand
+from .fsdev import Fsdev
 from .device import (
     AnyDevice, Device, ScsiHd, VhostUserFs, VhostVsock, Virtio9p, VirtioBalloon, VirtioBlk,
     VirtConsole, VirtioGpu, VirtioNet, VirtioRng, VirtioScsi, VirtioSerial,

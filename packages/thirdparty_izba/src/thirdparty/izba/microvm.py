@@ -139,6 +139,20 @@ class QemuMicroVmCommand():
 
         return id
 
+    
+    def add_9p_share(self, host_path, id=None, mount_tag=None):
+        if not id:
+            id = f"id{self._next_id()}"
+        
+        # TODO: Consider making mount_tag safe_dir_name(host_path.name)
+        # TODO: Verify host_path is accessible.
+
+        fsdev = qapi.Fsdev(id=id, path=host_path, security_model="mapped-xattr")
+        self._obj.fsdevs.append(fsdev)
+ 
+        device = qapi.Virtio9p(fsdev=id, mount_tag=id if mount_tag is None else mount_tag)
+        self._obj.devices.append(device)
+
 
     # ! TODO: local_path and remote_path are sockets and must be no more than 107 in length.
     def add_dgram_netdev(self, local_path, remote_path, id=None, mac="52:54:00:aa:00:02"):

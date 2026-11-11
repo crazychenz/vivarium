@@ -132,3 +132,20 @@ def test_socket_validation():
     assert ChardevSocket(host="127.0.0.1", port=4444, server=True, wait=False).legacy() == \
         "tcp:127.0.0.1:4444,server=on,wait=off"
     assert ChardevSocket(id="qmp0", path="x.qmp", server=True).render() == "socket,id=qmp0,path=x.qmp,server=on"
+
+
+def test_fsdev_9p_share():
+    from thirdparty.qemu.qapi import Fsdev, QemuCommand, Virtio9p
+
+    cmd = QemuCommand(
+        fsdevs=[Fsdev(id="fs0", path="/home/me/share", security_model="mapped-xattr")],
+        devices=[Virtio9p(fsdev="fs0", mount_tag="hostshare")],
+    )
+    assert cmd.options() == [
+        ["-fsdev", "local,id=fs0,path=/home/me/share,security_model=mapped-xattr"],
+        ["-device", "virtio-9p-device,fsdev=fs0,mount_tag=hostshare"],
+    ]
+    assert Fsdev(id="ro", path="/x", security_model="none", readonly=True).render() == \
+        "local,id=ro,path=/x,security_model=none,readonly=on"
+    with pytest.raises(ValidationError):
+        Fsdev(path="/x")  # id is required

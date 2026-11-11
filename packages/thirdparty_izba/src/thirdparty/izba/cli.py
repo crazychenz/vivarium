@@ -175,7 +175,7 @@ def izba_build_func(args, config):
 
 # Remove golden image.
 def izba_rmi_func(args, config):
-    Izba(config).rmi(image=args.image)
+    Izba(config).with_image(image=args.image).rmi()
 
 
 # If instance image missing, call create()
