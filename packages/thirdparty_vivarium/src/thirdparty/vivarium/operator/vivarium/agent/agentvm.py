@@ -130,7 +130,7 @@ class AgentVm():
         with open(self.path / "agent-oci.tar") as agent_oci:
             print("Loading agent OCI into AgentVM")
             self._agent_izba.exec(user='user', command=['docker', 'load'], stdin=agent_oci)
-            self._agent_izba.exec(user='user', command=['docker', 'run' '-tid', '--name', 'agent', '--rm', 'agent'])
+            self._agent_izba.exec(user='user', command=['docker', 'run', '-tid', '--name', 'agent', '--rm', 'agent'])
 
         self.start_mcp_tunnel()
 

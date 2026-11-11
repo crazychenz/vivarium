@@ -781,6 +781,23 @@ class IzbaCrtDriver():
                 #     append=True,
                 # ),
             # ],
+            # --- Boot-speed / snapshot-size tuning (persists into origin-overlay) ---
+            write_files=[
+                # Skip ds-identify probing every other datasource on later boots.
+                cc.WriteFile(
+                    path="/etc/cloud/cloud.cfg.d/90-izba-datasource.cfg",
+                    content="datasource_list: [ NoCloud, None ]\n",
+                    permissions="0644",
+                ),
+                # Runs in cloud-init's final stage on every boot, i.e. before
+                # `cloud-init status --wait` returns in _qemu_init_origin_overlay.
+                # Dropping the page cache shrinks origin-overlay.state (migrated RAM).
+                cc.WriteFile(
+                    path="/var/lib/cloud/scripts/per-boot/90-izba-drop-caches.sh",
+                    content="#!/bin/sh\nsync\necho 3 > /proc/sys/vm/drop_caches\nexit 0\n",
+                    permissions="0755",
+                ),
+            ],
             apt=cc.Apt(
                 sources={
                     "docker.list": cc.Sources(
@@ -821,6 +838,33 @@ class IzbaCrtDriver():
                 "systemctl enable --now docker containerd",
                 # enable per-user service manager
                 "loginctl enable-linger user",
+
+                # --- Trim boot work for origin-overlay (and smaller RAM snapshot) ---
+                # snapd: daemon + seeding + apparmor profiles on every boot.
+                "apt-get purge -y --auto-remove snapd || true",
+                "rm -rf /snap /var/snap /var/lib/snapd /var/cache/snapd",
+                # Periodic/background jobs that can fire right after boot.
+                [ 'systemctl', 'mask',
+                    'apt-daily.timer', 'apt-daily.service',
+                    'apt-daily-upgrade.timer', 'apt-daily-upgrade.service',
+                    'unattended-upgrades.service',
+                    'motd-news.timer', 'motd-news.service',
+                    'man-db.timer', 'fwupd-refresh.timer',
+                    'e2scrub_all.timer', 'e2scrub_reap.service', 'fstrim.timer',
+                    'update-notifier-download.timer', 'update-notifier-motd.timer',
+                ],
+                # Hardware/storage services pointless in a microvm.
+                [ 'systemctl', 'mask',
+                    'ModemManager.service', 'multipathd.service', 'multipathd.socket',
+                    'udisks2.service', 'iscsid.socket', 'open-iscsi.service',
+                    'lvm2-monitor.service', 'dm-event.socket',
+                    'systemd-pstore.service', 'apport.service',
+                ],
+                # Dynamic MOTD scripts run on each ssh login (incl. pidfile_ssh_wait).
+                "chmod -x /etc/update-motd.d/* || true",
+                # Last command decides runcmd's exit status; keep it non-failing so
+                # `cloud-init status --wait` doesn't report an error.
+                "true",
             ],
             power_state=power_state,
         )

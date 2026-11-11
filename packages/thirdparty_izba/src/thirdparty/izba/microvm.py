@@ -69,7 +69,9 @@ class QemuMicroVmCommand():
             # perform reboot with triple fault (good for microvm)
             'reboot': 't',
             # prevent lack of entropy from blocking startup.
-            'random.trust_cpu': 'on'
+            'random.trust_cpu': 'on',
+            'quiet': True,
+            'loglevel': '3',
         }
         self.appended_cmdline = []
 
@@ -244,7 +246,9 @@ class QemuMicroVmCommand():
 
         self._obj = qapi.QemuCommand(
             # --- common ---
-            machine=qapi.MicroVM(acpi=False),
+            # rtc: with acpi=off the CMOS RTC is not created by default ("auto"), so the
+            # kernel stalls ~1.5s on "Unable to read current time from RTC".
+            machine=qapi.MicroVM(acpi=False, rtc=True),
             no_reboot=True,
             enable_kvm=True,
             cpu="host",
