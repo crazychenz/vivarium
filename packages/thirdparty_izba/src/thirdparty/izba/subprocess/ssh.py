@@ -48,6 +48,7 @@ def stdin_ssh_run(
     """
 
     import io
+    import os
     import sys
     import subprocess
 
@@ -62,14 +63,20 @@ def stdin_ssh_run(
         ])
     if identity_fpath:
         cmd.extend(['-i', str(identity_fpath)])
-    cmd.append(destination)
-    if command:
-        cmd.append(command)
 
     try:
         fd = stdin.fileno()
     except (AttributeError, OSError, io.UnsupportedOperation):
         fd = None
+
+    # ssh only allocates a remote pty for a command when asked; without one,
+    # TTY-needing commands (docker attach, vim, ...) see a pipe on the far side.
+    if command and fd is not None and os.isatty(fd):
+        cmd.append('-t')
+
+    cmd.append(destination)
+    if command:
+        cmd.append(command)
 
     if fd is not None:
         return subprocess.run(cmd, stdin=fd).returncode
