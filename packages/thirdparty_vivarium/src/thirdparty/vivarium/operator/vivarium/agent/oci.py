@@ -175,7 +175,7 @@ def _build_agent_dockerfile():
             #open('context/wg-entrypoint.sh').read()),
         ),
         #COPY("wg-entrypoint.sh /usr/local/bin/entrypoint"),
-        df.Entrypoint(args=["/usr/local/bin/entrypoint.sh"]),
+        df.Entrypoint(args=["/usr/local/bin/claude"]),
     ])
 
     instructions.extend([
