@@ -62,10 +62,10 @@ class CommonQemuPaths():
         elif hasattr(izba, 'build_path'):
             self.vm_path = izba.build_path
 
-        self.logs = vm_path / "logs"
-        self.images = vm_path / "images"
-        self.artifacts = vm_path / "artifacts"
-        self.overlay = vm_path / "images" / "overlay.qcow2"
+        self.logs = self.vm_path / "logs"
+        self.images = self.vm_path / "images"
+        self.artifacts = self.vm_path / "artifacts"
+        self.overlay = self.vm_path / "images" / "overlay.qcow2"
 
         self.pidfile = izba.run_path / "qemu.pid"
         self.qmp = izba.run_path / "qemu.qmp"

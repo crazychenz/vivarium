@@ -12,8 +12,8 @@ def register_driver_microvm(driver_index: DriverIndex):
     driver_index.register_driver_class('microvm', IzbaMicroVmDriver)
 
 
-# TODO: Add BaseDriver base class.
-class IzbaMicroVmDriver():
+from thirdparty.izba.driver.izba import IzbaAbstractBaseDriver
+class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
     def __init__(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
@@ -63,7 +63,7 @@ class IzbaMicroVmDriver():
         # shutil.copytree(izba.gold_path / "keys", izba.gold_path / "import", dirs_exist_ok=True)
 
         build_izba_data_cb = callbacks.get('build_izba_data_cb', None)
-        if meta_data_cb:
+        if build_izba_data_cb:
             build_izba_data_cb(self, izba)
 
 
@@ -118,12 +118,12 @@ class IzbaMicroVmDriver():
 
         from thirdparty.izba.extraction import extract_from_disk_image
         # TODO: Need to get bootfiles the same way we do cache_izba_base.
-        extract_from_disk_image(self.base_img_path, self.cache_platform[self.base_os]['bootfiles'], cqpath.vm_path)
+        extract_from_disk_image(self.base_img_path, self.cache_platform[self.base_os]['bootfiles'], cqpath.images)
 
         return True
 
 
-    def build_izba_bundle(self, izba, **opts):
+    def build_izba_bundle(self, izba, callbacks={}, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         from thirdparty.qemu.cloud_init import make_seed
@@ -141,7 +141,7 @@ class IzbaMicroVmDriver():
         # TODO: Consider: cloud-init schema -c user-data --annotate
 
         build_izba_bundle_cb = callbacks.get('build_izba_bundle_cb', None)
-        if meta_data_cb:
+        if build_izba_bundle_cb:
             build_izba_bundle_cb(self, izba)
 
         make_seed(path=cqpath.seed, tree=(izba.build_path / "context"))
@@ -151,7 +151,7 @@ class IzbaMicroVmDriver():
         return True
 
 
-    def _qemu_build_base_image(self, izba, qemu_cmd_cb=None):
+    def _qemu_build_base_image(self, izba, count_lines=True, qemu_cmd_cb=None):
 
         cqpath = CommonQemuPaths(izba)
 
@@ -166,8 +166,8 @@ class IzbaMicroVmDriver():
 
         from thirdparty.izba.microvm import QemuMicroVmCommand
         qemu_cmd = QemuMicroVmCommand(
-            console_path=log_fpath,
-            qmp_path=(izba.run_path / "qemu.qmp"),
+            console_path=cqpath.console,
+            qmp_path=cqpath.qmp,
             pidfile_path=cqpath.pidfile,
         )
         qemu_cmd.boot_with(cqpath.kernel, cqpath.initrd)
@@ -200,6 +200,10 @@ class IzbaMicroVmDriver():
             traceback.print_exc()
             # breakpoint()
         
+        if count_lines:
+            with cqpath.console.open() as f:
+                print(f"!!!!!!!!!!!!!! _qemu_build_base_image lines: {sum(1 for line in f if line.startswith("["))}")
+
         return True
 
 
@@ -413,7 +417,7 @@ class IzbaMicroVmDriver():
             shutil.rmtree(cqpath.overlay, ignore_errors=True)
             return False
 
-        print(f"Created overlay {cqpath.overlay}")
+        log.info(f"Created overlay {cqpath.overlay}")
         return True
 
 
@@ -447,9 +451,6 @@ class IzbaMicroVmDriver():
                     f"{'still running' if alive else 'exited'}).")
             log.error(f"qemu stderr:\n{qemu_stderr_fpath.read_text()}")
             return False
-
-
-    
 
 
     # Starts the VM and leaves running until kill or stop.
@@ -507,7 +508,6 @@ class IzbaMicroVmDriver():
         log_command_fpath.write_text(f"#!/bin/sh\n\n{qemu_cmd.to_shell()}")
 
         pid = read_pid(cqpath.pidfile)
-
         if pid is not None and is_alive(pid):
             if exist_ok:
                 log.info(f"{izba.overlay_name} is already running (pid {pid}).")
@@ -588,8 +588,8 @@ class IzbaMicroVmDriver():
 
 
     # Executes command in VM (via SSH)
-    def exec_izba_command(self, izba, user='user', command=None, stdin=None, artifact_name=None):
-        print(f"--- {sys._getframe().f_code.co_qualname} ---")
+    def exec_izba_command(self, izba, user='user', command=None, stdin=None, artifact_name=None, **opts):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         from pathlib import Path
         from thirdparty.izba.subprocess import workdir, read_pid, is_alive
@@ -730,18 +730,18 @@ class IzbaMicroVmDriver():
             packages=[
                 "ca-certificates",
                 "curl",
-                # Docker
-                "docker-ce",
-                "docker-ce-cli",
-                "containerd.io",
-                "docker-buildx-plugin",
-                "docker-compose-plugin",
-                # Podman (rootless support)
-                "podman",
-                "uidmap",
-                "slirp4netns",
-                "fuse-overlayfs",
-                "passt",
+                # # Docker
+                # "docker-ce",
+                # "docker-ce-cli",
+                # "containerd.io",
+                # "docker-buildx-plugin",
+                # "docker-compose-plugin",
+                # # Podman (rootless support)
+                # "podman",
+                # "uidmap",
+                # "slirp4netns",
+                # "fuse-overlayfs",
+                # "passt",
             ],
             runcmd=[
                 # Mount seed iso

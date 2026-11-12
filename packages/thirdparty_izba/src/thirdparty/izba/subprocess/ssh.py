@@ -55,7 +55,7 @@ def stdin_ssh_run(
     if stdin is None:
         stdin = sys.stdin
 
-    cmd = [ssh, '-p', f'{port}', *extra_args]
+    cmd = [ssh, '-o', 'LogLevel=ERROR', '-p', f'{port}', *extra_args]
     if not known_hosts:
         cmd.extend([
             "-o", "StrictHostKeyChecking=no",

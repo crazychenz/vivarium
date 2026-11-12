@@ -546,7 +546,7 @@ class Izba():
             return False
         
         # Do the with_overlay stuff required for start, exec, stop, and rm
-        self.with_overlay(name)
+        self.with_overlay(self.overlay_name)
         
         if not self.start(network='none', console='none', **opts):
             print("Failed to start instance.")
@@ -556,7 +556,7 @@ class Izba():
         self.driver.run_ready_wait(self)
         
         ret = False
-        if self.exec(network='none', user='user', command=command, stdin=None, **opts):
+        if self.exec(user='user', command=command, stdin=None, network='none', **opts):
             ret = True
 
         self.stop(**opts)

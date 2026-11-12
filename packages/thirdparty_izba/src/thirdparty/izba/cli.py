@@ -303,6 +303,7 @@ def main():
             traceback.print_exc()
         if args.breakpoint:
             breakpoint()
+        exit(1)
 
 
 if __name__ == "__main__":
