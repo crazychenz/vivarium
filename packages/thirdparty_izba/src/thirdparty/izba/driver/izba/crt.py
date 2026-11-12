@@ -50,20 +50,22 @@ class IzbaCrtDriver(IzbaMicroVmDriver):
 
         import thirdparty.qemu.cloud_init.cloud_config as cc
         
-        self.cloud_init_user_data.packages.extend([
+        pkgnames = [
             # Docker
-            cc.PackageItemDefinition(root="docker-ce"),
-            cc.PackageItemDefinition(root="docker-ce-cli"),
-            cc.PackageItemDefinition(root="containerd.io"),
-            cc.PackageItemDefinition(root="docker-buildx-plugin"),
-            cc.PackageItemDefinition(root="docker-compose-plugin"),
+            "docker-ce",
+            "docker-ce-cli",
+            "containerd.io",
+            "docker-buildx-plugin",
+            "docker-compose-plugin",
             # Podman (rootless support)
-            cc.PackageItemDefinition(root="podman"),
-            cc.PackageItemDefinition(root="uidmap"),
-            cc.PackageItemDefinition(root="slirp4netns"),
-            cc.PackageItemDefinition(root="fuse-overlayfs"),
-            cc.PackageItemDefinition(root="passt"),
-        ])
+            "podman",
+            "uidmap",
+            "slirp4netns",
+            "fuse-overlayfs",
+            "passt",
+        ]
+        for pkgname in pkgnames:
+            self.cloud_init_user_data.packages.append(cc.PackageItemDefinition(root=pkgname))
 
         if self.cloud_init_user_data.groups is None:
             self.cloud_init_user_data.groups = {}
@@ -107,7 +109,7 @@ class IzbaCrtDriver(IzbaMicroVmDriver):
     # build_base_disk_image) on top of a fresh overlay disk created by Izba.create().
     def start_izba(self, izba, console='stdout', exist_ok=False, callbacks={}, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().debug(izba, console=console, exist_ok=exist_ok, callbacks=callbacks, **opts)
+        return super().start_izba(izba, console=console, exist_ok=exist_ok, callbacks=callbacks, **opts)
 
 
     def izba_is_running(self, izba, overlay_path):

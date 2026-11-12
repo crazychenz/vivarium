@@ -191,7 +191,7 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
             cqpath.ssh_host_port.parent.mkdir(parents=True, exist_ok=True)
             cqpath.ssh_host_port.write_text(f"{ssh_host_port}\n")
             from thirdparty.izba.subprocess import run_and_follow_with_pidfile
-            run_and_follow_with_pidfile(qemu_cmd.to_args(), cqpath.console, cqpath.pidfile)
+            run_and_follow_with_pidfile(qemu_cmd.to_args(), cqpath.console, cqpath.pidfile, progress="spinner")
 
         except Exception as e:
             # TODO: Unlink golden image.

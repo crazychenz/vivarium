@@ -77,27 +77,153 @@ def run_with_timeout(args, timeout, grace=5):
         return proc.returncode, out, err, True  # True = timed out
 
 
+class _ProgressSink:
+    """Binary file-like sink for `tail_follow` that renders a spinner or progress
+    bar instead of echoing the log.
+
+    Counts complete lines that start with `prefix`; with `expected` set, the
+    percentage is `count / expected` (capped at 100%). Without it, shows a spinner.
+    Rendering runs on its own thread so the spinner keeps moving while the log is quiet.
+    """
+
+    _FRAMES = "|/-\\"
+
+    def __init__(self, mode, expected=None, prefix="[", width=30, label="", interval=0.1,
+                 stream=None, keep_tail=20):
+        import collections
+        import threading
+        self.mode = mode
+        self.expected = expected
+        self.prefix = prefix.encode() if isinstance(prefix, str) else prefix
+        self.width = width
+        self.label = f"{label} " if label else ""
+        self.interval = interval
+        self.stream = stream if stream is not None else sys.stderr
+        self.count = 0
+        self.tail = collections.deque(maxlen=keep_tail)  # recent lines, dumped on failure
+        self._partial = b""
+        self._frame = 0
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    # -- file-like interface used by tail_follow --------------------------------
+    def write(self, chunk):
+        with self._lock:
+            data = self._partial + chunk
+            *lines, self._partial = data.split(b"\n")
+            for line in lines:
+                line = line.rstrip(b"\r")
+                self.tail.append(line)
+                if line.startswith(self.prefix):
+                    self.count += 1
+        return len(chunk)
+
+    def flush(self):
+        pass
+
+    # -- rendering --------------------------------------------------------------
+    def _line(self, final=False):
+        if self.mode == "percent":
+            frac = min(self.count / self.expected, 1.0)
+            if final:
+                frac = 1.0 if self._ok else frac
+            filled = int(self.width * frac)
+            bar = "#" * filled + "-" * (self.width - filled)
+            return f"{self.label}[{bar}] {frac * 100:5.1f}%"
+        # spinner
+        if final:
+            return f"{self.label}{'done' if self._ok else 'failed'} ({self.count} lines)"
+        frame = self._FRAMES[self._frame % len(self._FRAMES)]
+        self._frame += 1
+        return f"{self.label}{frame} ({self.count} lines)"
+
+    def _render(self, final=False):
+        with self._lock:
+            text = self._line(final)
+        # \r + clear-to-end-of-line so shorter lines don't leave leftovers
+        self.stream.write("\r" + text + "\033[K" + ("\n" if final else ""))
+        self.stream.flush()
+
+    def _run(self):
+        while not self._stop.wait(self.interval):
+            self._render()
+
+    def start(self):
+        self._ok = False
+        self._thread.start()
+
+    def finish(self, ok=True):
+        self._stop.set()
+        self._thread.join()
+        self._ok = ok
+        self._render(final=True)
+        if not ok and self.tail:
+            self.stream.write("--- last log lines ---\n")
+            self.stream.write(b"\n".join(self.tail).decode(errors="replace") + "\n")
+            self.stream.flush()
+
+
 # args = qemu_cmd_obj.to_args()
-def run_and_follow_with_pidfile(args, log_fpath, pidfile_fpath):
-# TODO: Consider wrapping in a util function
+def run_and_follow_with_pidfile(args, log_fpath, pidfile_fpath, progress="log", progress_opts=None):
+    """Run `args`, then follow `log_fpath` until the process in `pidfile_fpath` exits.
+
+    `progress` selects how the log is shown:
+      - "log":     echo the log to stdout (tail -f)
+      - "spinner": show a spinner on stderr
+      - "percent": show a progress bar on stderr, based on the number of log lines
+                   starting with "[" versus `progress_opts["expected"]`
+
+    `progress_opts` (dict, optional):
+      - expected:     number of "["-prefixed lines expected (required for "percent";
+                      without it, falls back to "spinner")
+      - prefix:       line prefix to count (default "[")
+      - width:        progress bar width in characters (default 30)
+      - label:        text shown before the spinner/bar
+      - interval:     redraw interval in seconds (default 0.1)
+      - idle_timeout: stop following after this many seconds without output (default 60)
+    """
     import subprocess
-    import sys
     import threading
-    import time
     from pathlib import Path
 
     from thirdparty.izba.logging import tail_follow
+
+    if progress not in ("log", "spinner", "percent"):
+        raise ValueError(f"progress must be 'log', 'spinner' or 'percent', not {progress!r}")
+    opts = dict(progress_opts or {})
+    idle_timeout = opts.pop("idle_timeout", 60)
+
+    if progress == "percent" and not opts.get("expected"):
+        log.warning("progress='percent' needs progress_opts['expected'] > 0; using spinner")
+        progress = "spinner"
+    if progress == "spinner":
+        opts.pop("expected", None)
+
+    sink = None
+    if progress != "log":
+        unknown = set(opts) - {"expected", "prefix", "width", "label", "interval"}
+        if unknown:
+            raise TypeError(f"unknown progress_opts: {', '.join(sorted(unknown))}")
+        sink = _ProgressSink(progress, **opts)
+
     Path(pidfile_fpath).unlink(missing_ok=True)
     proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)
     t = threading.Thread(
         target=tail_follow,
         args=(log_fpath, pidfile_fpath),
-        kwargs={"idle_timeout": 60},
+        kwargs={"idle_timeout": idle_timeout, "out": sink},
         daemon=True,
     )
+    if sink is not None:
+        sink.start()
     t.start()
     rc = proc.wait()
-    t.join()
+    try:
+        t.join()
+    finally:
+        if sink is not None:
+            sink.finish(ok=(rc == 0))
     return rc
 
 

@@ -42,5 +42,5 @@ agent = "thirdparty.vivarium.operator.vivarium.agent:register_operator_agent"
 
 [project.entry-points."thirdparty_izba_drivers"]
 # Register crt (container runtime) as an izba driver
-#vivarium_agentvm = "thirdparty.vivarium.izba.driver.agentvm:register_driver_agentvm"
-#vivarium_enclosurevm = "thirdparty.vivarium.izba.driver.enclosurevm:register_driver_enclosurevm"
+vivarium_agentvm = "thirdparty.vivarium.izba.driver.agentvm:register_driver_vivarium_agentvm"
+vivarium_enclosurevm = "thirdparty.vivarium.izba.driver.enclosurevm:register_driver_vivarium_enclosurevm"

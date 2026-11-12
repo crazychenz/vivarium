@@ -280,7 +280,7 @@ def main():
     logging.basicConfig(level=level, format="%(levelname)-8s %(name)s: %(message)s")
 
     # dissect logs a traceback for every optional format that isn't installed.
-    logging.getLogger("dissect.target").setLevel(logging.WARNING)
+    logging.getLogger("dissect.target").setLevel(logging.ERROR)
 
     for spec in args.log_level:
         module, level_name = spec.split(":")
