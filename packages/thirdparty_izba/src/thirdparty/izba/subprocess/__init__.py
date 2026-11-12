@@ -78,24 +78,20 @@ def run_with_timeout(args, timeout, grace=5):
 
 
 class _ProgressSink:
-    """Binary file-like sink for `tail_follow` that renders a spinner or progress
-    bar instead of echoing the log.
+    """Binary file-like sink for `tail_follow` that renders a spinner instead of
+    echoing the log.
 
-    Counts complete lines that start with `prefix`; with `expected` set, the
-    percentage is `count / expected` (capped at 100%). Without it, shows a spinner.
-    Rendering runs on its own thread so the spinner keeps moving while the log is quiet.
+    Counts complete lines that start with `prefix` and shows the count next to
+    the spinner. Rendering runs on its own thread so the spinner keeps moving
+    while the log is quiet.
     """
 
     _FRAMES = "|/-\\"
 
-    def __init__(self, mode, expected=None, prefix="[", width=30, label="", interval=0.1,
-                 stream=None, keep_tail=20):
+    def __init__(self, prefix="[", label="", interval=0.1, stream=None, keep_tail=20):
         import collections
         import threading
-        self.mode = mode
-        self.expected = expected
         self.prefix = prefix.encode() if isinstance(prefix, str) else prefix
-        self.width = width
         self.label = f"{label} " if label else ""
         self.interval = interval
         self.stream = stream if stream is not None else sys.stderr
@@ -124,19 +120,11 @@ class _ProgressSink:
 
     # -- rendering --------------------------------------------------------------
     def _line(self, final=False):
-        if self.mode == "percent":
-            frac = min(self.count / self.expected, 1.0)
-            if final:
-                frac = 1.0 if self._ok else frac
-            filled = int(self.width * frac)
-            bar = "#" * filled + "-" * (self.width - filled)
-            return f"{self.label}[{bar}] {frac * 100:5.1f}%"
-        # spinner
         if final:
             return f"{self.label}{'done' if self._ok else 'failed'} ({self.count} lines)"
         frame = self._FRAMES[self._frame % len(self._FRAMES)]
         self._frame += 1
-        return f"{self.label}{frame} ({self.count} lines)"
+        return f"{self.label}{frame} ({self.count} log lines)"
 
     def _render(self, final=False):
         with self._lock:
@@ -170,16 +158,11 @@ def run_and_follow_with_pidfile(args, log_fpath, pidfile_fpath, progress="log", 
 
     `progress` selects how the log is shown:
       - "log":     echo the log to stdout (tail -f)
-      - "spinner": show a spinner on stderr
-      - "percent": show a progress bar on stderr, based on the number of log lines
-                   starting with "[" versus `progress_opts["expected"]`
+      - "spinner": show a spinner on stderr, with a count of log lines starting with "["
 
     `progress_opts` (dict, optional):
-      - expected:     number of "["-prefixed lines expected (required for "percent";
-                      without it, falls back to "spinner")
       - prefix:       line prefix to count (default "[")
-      - width:        progress bar width in characters (default 30)
-      - label:        text shown before the spinner/bar
+      - label:        text shown before the spinner
       - interval:     redraw interval in seconds (default 0.1)
       - idle_timeout: stop following after this many seconds without output (default 60)
     """
@@ -189,23 +172,17 @@ def run_and_follow_with_pidfile(args, log_fpath, pidfile_fpath, progress="log", 
 
     from thirdparty.izba.logging import tail_follow
 
-    if progress not in ("log", "spinner", "percent"):
-        raise ValueError(f"progress must be 'log', 'spinner' or 'percent', not {progress!r}")
+    if progress not in ("log", "spinner"):
+        raise ValueError(f"progress must be 'log' or 'spinner', not {progress!r}")
     opts = dict(progress_opts or {})
     idle_timeout = opts.pop("idle_timeout", 60)
 
-    if progress == "percent" and not opts.get("expected"):
-        log.warning("progress='percent' needs progress_opts['expected'] > 0; using spinner")
-        progress = "spinner"
-    if progress == "spinner":
-        opts.pop("expected", None)
-
     sink = None
-    if progress != "log":
-        unknown = set(opts) - {"expected", "prefix", "width", "label", "interval"}
+    if progress == "spinner":
+        unknown = set(opts) - {"prefix", "label", "interval"}
         if unknown:
             raise TypeError(f"unknown progress_opts: {', '.join(sorted(unknown))}")
-        sink = _ProgressSink(progress, **opts)
+        sink = _ProgressSink(**opts)
 
     Path(pidfile_fpath).unlink(missing_ok=True)
     proc = subprocess.Popen(args, stdin=subprocess.DEVNULL)

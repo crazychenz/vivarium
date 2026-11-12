@@ -200,10 +200,6 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
             traceback.print_exc()
             # breakpoint()
         
-        if count_lines:
-            with cqpath.console.open() as f:
-                print(f"!!!!!!!!!!!!!! _qemu_build_base_image lines: {sum(1 for line in f if line.startswith("["))}")
-
         return True
 
 
@@ -279,14 +275,14 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
             # --- Start qemu ---
             cqpath.ssh_host_port.parent.mkdir(parents=True, exist_ok=True)
             cqpath.ssh_host_port.write_text(f"{ssh_host_port}\n")
-
-            # from thirdparty.izba.subprocess import run_and_follow_with_pidfile
-            # run_and_follow_with_pidfile(qemu_cmd.to_args(), log_fpath, cqpath.pidfile)
-            import subprocess
+            
             #* Daemonized qemu causes this to return quickly.
-            # The daemon inherits this stderr, so its error messages land in the file.
-            with open(cqpath.stderr_log, "w") as qemu_stderr:
-                subprocess.run(qemu_cmd.to_args(), stdout=qemu_stderr, stderr=qemu_stderr)
+            from thirdparty.izba.subprocess import run_and_follow_with_pidfile
+            run_and_follow_with_pidfile(qemu_cmd.to_args(), cqpath.console, cqpath.pidfile, progress="spinner")
+
+            ### import subprocess
+            ### with open(cqpath.stderr_log, "w") as qemu_stderr:
+            ###    subprocess.run(qemu_cmd.to_args(), stdout=qemu_stderr, stderr=qemu_stderr)
 
             # --- Wait for cloud-init to complete and sshd to be ready. ---
             print("Waiting for cloud-init to finish before doing snapshot.")
