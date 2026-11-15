@@ -117,8 +117,7 @@ ubuntu   01a1debd331a   42781f2d70b7
 | Option | Meaning |
 |---|---|
 | `-t, --tag NAME` | tag the imported layer (repeatable) |
-| `--arch ARCH` | architecture of the download (default `x64`) |
-| `--platform PLATFORM` | platform of the download (default `linux`) |
+| `--platform-arch KEY` | which `downloads` group to use (default `linux-x64`) |
 | `--size SIZE` | root disk size, e.g. `20G` (default `10G`) |
 | `--driver NAME` | driver for the layer (default `microvm`) |
 
@@ -126,13 +125,14 @@ ubuntu   01a1debd331a   42781f2d70b7
 izba import ubuntu --size 20G -t ubuntu-20g
 ```
 
-The available distros are the `downloads` entries in the config. The built-in
-ones are `ubuntu` (noble) and `alpine` (3.24), both `linux`/`x64`. Builds
+The available distros are the entries in `config['downloads'][platform_arch]`;
+an unknown distro or platform_arch raises a `KeyError`. The built-in ones are
+`ubuntu` (noble) and `alpine` (3.24), both under `linux-x64`. Builds
 currently assume Ubuntu: the base provisioning uses apt, so use `ubuntu` as the
 import for layers you build on.
 
 A build with `from: {import: ubuntu}` reuses an existing import with the same
-distro, platform and arch, whatever its size. For a different disk size, run
+distro and platform_arch, whatever its size. For a different disk size, run
 `izba import --size …` with a tag and build `from:` that tag.
 
 ## Building layers
@@ -146,7 +146,7 @@ ID.
 
 ```yaml
 from: devbox                  # parent: a tag, layer ID or ID prefix
-                              # or: from: {import: ubuntu, arch: x64}
+                              # or: from: {import: ubuntu, platform_arch: linux-x64}
 driver: crt                   # optional; defaults to the parent's driver
 tags: [devbox-docker]         # optional
 boot:                         # optional

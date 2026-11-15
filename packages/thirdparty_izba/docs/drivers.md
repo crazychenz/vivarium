@@ -16,7 +16,6 @@ directly, what the microvm driver does, and which `Izba` method calls it.
 - [What a driver receives](#what-a-driver-receives)
   - [Getting a driver and a context](#getting-a-driver-and-a-context)
 - [The calls](#the-calls)
-  - [resolve_source](#resolve_source)
   - [import_container](#import_container)
   - [create_container](#create_container)
   - [provision_container](#provision_container)
@@ -92,18 +91,21 @@ parent layer. The kinds live in `thirdparty.izba.layer`:
 | Kind | Stored as | Relation to the parent |
 |---|---|---|
 | `CHAIN` | a path in the layer folder | every layer has its own (`root.qcow2`), backed by the parent's; required |
-| `INHERIT` | a blob or a yaml value | inherited unless this layer produces a different one |
+| `INHERIT` | a path in the folder of the layer that introduced it, or a yaml value | inherited unless this layer produces a different one |
 | `LOCAL` | a path in the layer folder | this layer only, never inherited (a RAM snapshot) |
-| `INSTANCE_COPY` | a blob | inherited, but each container gets its own writable copy (UEFI NVRAM) |
+| `INSTANCE_COPY` | a path, like `INHERIT` | inherited, but each container gets its own writable copy (UEFI NVRAM) |
 
 Izba writes the fully resolved slot table into `layer.yaml`. Each entry records
 the layer that introduced it in `from:`, so starting a container never walks
-the parent chain:
+the parent chain. A file's `path` is relative to the `from` layer's folder: an
+unchanged inherited file stays in the ancestor that introduced it and is never
+copied (or linked) down the chain. `izba rmi` refuses to remove a layer that has
+child layers, so that ancestor is always there:
 
 ```yaml
 artifacts:
   root:    {kind: chain,   path: images/root.qcow2, sha256: c9e6…, from: 01a1de46e75f…}
-  kernel:  {kind: inherit, blob: "sha256:41ba…",                   from: 01a1de46dcb3…}
+  kernel:  {kind: inherit, path: boot/kernel, sha256: 41ba…,       from: 01a1de46dcb3…}
   root_device: {kind: inherit, value: LABEL=cloudimg-rootfs,      from: 01a1de46dcb3…}
   state:   {kind: local,   path: images/state.bin, sha256: 77f0…,  from: 01a1de4ab7ed…}
 ```
@@ -111,22 +113,21 @@ artifacts:
 ## What a driver receives
 
 Every call gets the `Izba` instance (for config and paths) and a
-`ContainerContext` (`thirdparty.izba.layer`) describing one container:
+`ContainerContext` (`thirdparty.izba.container`) describing one container:
 
 | Field / method | Meaning |
 |---|---|
-| `ctx.id` | the container's uuid7; it becomes the layer id on commit |
-| `ctx.path` | the container folder, `containers/by_uuid7/<id>` |
-| `ctx.socket_path` | short private folder for sockets and pidfiles |
-| `ctx.parent` | the `Layer` it was created from, or `None` for an import |
-| `ctx.blobs` | the `BlobStore` (`layers/blobs`) |
-| `ctx.record` / `ctx.save_record()` | the `container.yaml` dict |
-| `ctx.value(slot)` / `ctx.set_value(slot, v)` | an inheritable value: this container's own if set, else the parent's |
-| `ctx.local_values()` | values this container set itself (return them from commit) |
-| `ctx.artifact(slot, local_path)` | `local_path` if it exists, else the parent's file for that slot |
+| `ctr_ctx.id` | the container's uuid7; it becomes the layer id on commit |
+| `ctr_ctx.path` | the container folder, `containers/by_uuid7/<id>` |
+| `ctr_ctx.socket_path` | short private folder for sockets and pidfiles |
+| `ctr_ctx.parent` | the `Layer` it was created from, or `None` for an import |
+| `ctr_ctx.record` / `ctr_ctx.save_record()` | the `container.yaml` dict |
+| `ctr_ctx.value(slot)` / `ctr_ctx.set_value(slot, v)` | an inheritable value: this container's own if set, else the parent's |
+| `ctr_ctx.local_values()` | values this container set itself (return them from commit) |
+| `ctr_ctx.artifact(slot, local_path)` | `local_path` if it exists, else the parent's file for that slot |
 
-A `Layer` offers `layer.artifact(slot)` (a path, for either a folder path or a
-blob), `layer.value(slot)`, `layer.entry(slot)`, `layer.id`, `layer.sha256`,
+A `Layer` offers `layer.artifact(slot)` (the file's path, inside whichever
+layer introduced it), `layer.value(slot)`, `layer.entry(slot)`, `layer.id`, `layer.sha256`,
 `layer.format`, `layer.driver` and `layer.parent_id`.
 
 Drivers report failure by raising, never by returning `False`.
@@ -152,7 +153,7 @@ uuid7, name or unique prefix to its folder, and `izba._container_from_path()` re
 the container's own driver with its context:
 
 ```python
-driver, ctx = izba._container_from_path(izba._resolve_container_path("dev"))
+driver, ctr_ctx = izba._container_from_path(izba._resolve_container_path("dev"))
 ```
 
 For a **new** container (before `import_container` or `create_container`),
@@ -160,25 +161,24 @@ make an empty folder and record. This is what Izba does internally, minus
 container naming:
 
 ```python
-from thirdparty.izba.layer import ContainerContext, new_container_record
+from thirdparty.izba.container import ContainerContext, new_container_record
 from thirdparty.izba.uuid import uuid7
 
 def new_context(izba, driver, parent=None):
     if parent is not None and parent.format != driver.layer_format:
         raise ValueError(f"{driver.name} ({driver.layer_format}) can't use {parent.format}")
     cid = uuid7()
-    ctx = ContainerContext(
+    ctr_ctx = ContainerContext(
         id=cid,
         path=izba.containers_path / "by_uuid7" / cid.hex,
         socket_path=izba.sockets_path / cid.hex,
         parent=parent,
-        blobs=izba.blobs,
         record=new_container_record(cid, driver, parent),
     )
-    ctx.path.mkdir(parents=True)
-    ctx.socket_path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    ctx.save_record()
-    return ctx
+    ctr_ctx.path.mkdir(parents=True)
+    ctr_ctx.socket_path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    ctr_ctx.save_record()
+    return ctr_ctx
 ```
 
 The examples below build on `izba`, `drivers` and `new_context`, and run in
@@ -187,69 +187,38 @@ of the result. The outputs shown are from a real run.
 
 ## The calls
 
-### resolve_source
-
-```python
-def resolve_source(self, izba, source) -> dict
-```
-
-Returns an import `source` with the driver's defaults filled in, and rejects
-keys it doesn't know. The source **identifies** what is imported; options
-that only change how it's imported (such as microvm's `size`) are not part of
-it. Izba reuses an existing import layer whose recorded source matches the
-resolved one, so two sources that resolve equal must be interchangeable.
-
-Optional: the base class returns a copy of `source` unchanged.
-
-```python
-driver = drivers.create("microvm")
-
-driver.resolve_source(izba, {"import": "ubuntu"})
-# {'import': 'ubuntu', 'platform': 'linux', 'arch': 'x64'}
-
-driver.resolve_source(izba, {"import": "ubuntu", "size": "20G"})
-# ValueError: Unknown import source keys ['size']; expected ['import', 'platform', 'arch']
-
-driver.resolve_source(izba, {"import": "ubuntu", "arch": "arm64"})
-# KeyError: "no download for 'ubuntu' on linux-arm64; have []"
-```
-
-microvm's source keys are `import` (the distro: a key into
-`config['downloads']['<platform>-<arch>']`), `platform` (default `linux`) and
-`arch` (default `x64`).
-
-Called by `Izba.build()` before deciding whether `from: {import: …}` needs a
-new import.
-
 ### import_container
 
 ```python
-def import_container(self, izba, ctx, source, **opts)
+def import_container(self, izba, ctr_ctx, source, **opts)
 ```
 
-Populates a parentless container (`ctx.parent is None`) from an external
+Populates a parentless container (`ctr_ctx.parent is None`) from an external
 source. It doesn't boot anything. The container is meant to be committed
 straight away, so whatever `commit_container` needs must be in place when
 this returns.
 
 - `source` identifies what to import: the `from:` value of a build spec, or
-  what `izba import` was given. Resolve it with `resolve_source` first.
+  what `izba import` was given. For microvm it is
+  `{"import": <distro>, "platform_arch": <key>}`; `platform_arch` defaults to
+  `linux-x64`, and both are plain lookups into
+  `config['downloads'][platform_arch][distro]` (a bad value raises `KeyError`).
 - Options that don't identify the source come in `opts`.
-- Record the resolved source, plus any provenance, in `ctx.record["source"]`
-  (saved with `ctx.save_record()`). It ends up as `source:` in the layer
+- Record the source (with defaults filled in), plus any provenance, in `ctr_ctx.record["source"]`
+  (saved with `ctr_ctx.save_record()`). It ends up as `source:` in the layer
   manifest, which is what later reuse is matched against.
 
 ```python
 driver = drivers.create("microvm")
-ctx = new_context(izba, driver)                       # parent=None
-driver.import_container(izba, ctx, {"import": "ubuntu", "arch": "x64"}, size="20G")
+ctr_ctx = new_context(izba, driver)                       # parent=None
+driver.import_container(izba, ctr_ctx, {"import": "ubuntu"}, size="20G")
 
-print(ctx.record["source"])
-# {'import': 'ubuntu', 'platform': 'linux', 'arch': 'x64',
+print(ctr_ctx.record["source"])
+# {'import': 'ubuntu', 'platform_arch': 'linux-x64',
 #  'upstream': 'https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img',
 #  'sha256': '04e8f2461a16…'}
-print(ctx.value("bootfiles"))           # {'kernel': '/boot/vmlinuz', 'initrd': '/boot/initrd.img'}
-print(ctx.value("root_device"))         # LABEL=cloudimg-rootfs  (the download entry's 'root')
+print(ctr_ctx.value("bootfiles"))           # {'kernel': '/boot/vmlinuz', 'initrd': '/boot/initrd.img'}
+print(ctr_ctx.value("root_device"))         # LABEL=cloudimg-rootfs  (the download entry's 'root')
 ```
 
 The download entry must name the image's root filesystem as `root`, e.g.
@@ -257,35 +226,35 @@ The download entry must name the image's root filesystem as `root`, e.g.
 the `root_device` slot, which every start passes to the kernel as `root=`.
 
 microvm's option is `size=`: the root disk size (default `"10G"`). It
-downloads the image once into
+downloads the image once (`izba.cache_download(distro, platform_arch)`) into
 `downloads/by_sha256/<sha256>` and creates `images/root.qcow2` backed by it.
 The kernel and initrd are not extracted here; `commit_container` reads them
 out of the root.
 
-Called by `Izba.import_()` (`izba import ubuntu --arch x64 --size 20G`), and by
-a build whose spec says `from: {import: ubuntu, arch: x64}` when no matching
-import exists yet. Options reach it through the `**opts` of `Izba.import_()`
+Called by `Izba.import_()` (`izba import ubuntu --size 20G`), and by a build
+whose spec says `from: {import: ubuntu}` when no import with the same
+`import` and `platform_arch` exists yet. Options reach it through the `**opts` of `Izba.import_()`
 or `Izba.build()`.
 
 ### create_container
 
 ```python
-def create_container(self, izba, ctx, **opts)
+def create_container(self, izba, ctr_ctx, **opts)
 ```
 
-Populates a new container from `ctx.parent`: typically a writable disk backed
+Populates a new container from `ctr_ctx.parent`: typically a writable disk backed
 by the parent's `CHAIN` slot, plus copies of any `INSTANCE_COPY` slots.
-`INHERIT` artifacts are not copied; read them through `ctx.artifact()` /
-`ctx.value()`, which fall back to the parent.
+`INHERIT` artifacts are not copied; read them through `ctr_ctx.artifact()` /
+`ctr_ctx.value()`, which fall back to the parent.
 
 ```python
 parent = izba.layer("test-b")                 # name, uuid7 or sha256 prefix
 driver = drivers.create(parent.driver)        # or any driver with the same layer_format
-ctx = new_context(izba, driver, parent)
-driver.create_container(izba, ctx)
+ctr_ctx = new_context(izba, driver, parent)
+driver.create_container(izba, ctr_ctx)
 
-print(ctx.artifact("kernel"))   # …/layers/blobs/sha256/41ba36d8…  (the parent's blob)
-print(ctx.value("root_device")) # LABEL=cloudimg-rootfs  (inherited)
+print(ctr_ctx.artifact("kernel"))   # …/layers/by_uuid7/01a1de46dcb3…/boot/kernel  (the ancestor that introduced it)
+print(ctr_ctx.value("root_device")) # LABEL=cloudimg-rootfs  (inherited)
 ```
 
 microvm creates `images/root.qcow2` backed by the parent's `root.qcow2`,
@@ -297,7 +266,7 @@ Izba removes the container if this raises.
 ### provision_container
 
 ```python
-def provision_container(self, izba, ctx, spec, **opts)
+def provision_container(self, izba, ctr_ctx, spec, **opts)
 ```
 
 Customizes a stopped container according to a build spec and leaves it
@@ -317,8 +286,8 @@ spec = {
         "runcmd": ["echo layer-x > /etc/izba-layer-x"],
     },
 }
-driver.provision_container(izba, ctx, spec)
-assert not driver.container_is_running(izba, ctx)
+driver.provision_container(izba, ctr_ctx, spec)
+assert not driver.container_is_running(izba, ctr_ctx)
 ```
 
 microvm reads `boot.root` (replaces the inherited `root_device`),
@@ -353,70 +322,71 @@ inspection if this raises.
 ### commit_container
 
 ```python
-def commit_container(self, izba, ctx, layer_path, **opts) -> dict
+def commit_container(self, izba, ctr_ctx, layer_path, **opts) -> dict
 ```
 
 Prepares a stopped container to become a layer at `layer_path`, and returns
 its artifacts. The container folder is moved to `layer_path` afterwards, so
 fix up anything location dependent (such as relative backing paths) for
-`layer_path`, not for `ctx.path`.
+`layer_path`, not for `ctr_ctx.path`.
 
 Return `{slot: entry}` with one of these shapes per slot:
 
 | Entry | For kinds | Meaning |
 |---|---|---|
-| `{"path": "images/x", "sha256": …}` | `CHAIN`, `LOCAL` | a file inside the layer folder |
-| `{"blob": "sha256:…"}` | `INHERIT`, `INSTANCE_COPY` | from `ctx.blobs.put(...)` or `ctx.blobs.put_stream(...)` |
-| `{"value": …}` | `INHERIT` | any yaml-serializable data |
+| `{"path": "images/x", "sha256": …}` | any | a file inside the container folder (relative; it becomes the layer folder) |
+| `{"value": …}` | `INHERIT`, `INSTANCE_COPY` | any yaml-serializable data |
 
-Leave out a slot to inherit it from the parent.
+`CHAIN` and `LOCAL` slots must be paths. Leave out an `INHERIT` slot to inherit
+it from the parent. An `INHERIT` file whose `sha256` equals the parent's is
+inherited too (the parent's entry is kept), but then the file you wrote is
+unreferenced dead weight in the layer, so don't produce one; compare with
+`ctr_ctx.parent.entry(slot)["sha256"]` first.
 
 ```python
-layer_path = izba.layers_path / "by_uuid7" / ctx.id.hex
-artifacts = driver.commit_container(izba, ctx, layer_path)
+layer_path = izba.layers_path / "by_uuid7" / ctr_ctx.id.hex
+artifacts = driver.commit_container(izba, ctr_ctx, layer_path)
 for slot, entry in artifacts.items():
     print(slot, entry)
 ```
 
 ```text
-kernel  {'blob': 'sha256:41ba36d8…'}
-initrd  {'blob': 'sha256:bf276ffc…'}
 root    {'path': 'images/root.qcow2', 'sha256': 'ded4996d…'}
 state   {'path': 'images/state.bin', 'sha256': '5fdfe391…'}
-seed    {'blob': 'sha256:4733ef61…'}
+seed    {'path': 'images/seed.iso', 'sha256': '4733ef61…'}
 cmdline {'value': {'quiet': False}}
 ```
 
-`identity`, `ssh_pubkey` and `root_device` are absent because this container
-didn't change them, so they're inherited.
+`kernel`, `initrd`, `identity`, `ssh_pubkey` and `root_device` are absent
+because this container didn't change them, so they're inherited.
 
 **This call is not repeatable and leaves the container half committed:**
-`root.qcow2` now points at its parent as seen from `layer_path`, and the
-container's own seed and identity have moved into the blob store. Always
+`root.qcow2` now points at its parent as seen from `layer_path`. Always
 finish the commit:
 
 ```python
-from thirdparty.izba.layer import (build_manifest, write_manifest,
-                                   LAYER_MANIFEST, CONTAINER_RECORD)
+from thirdparty.izba.layer import build_manifest, write_manifest, LAYER_MANIFEST
+from thirdparty.izba.container import CONTAINER_RECORD
 
-manifest = build_manifest(driver, ctx, artifacts)     # merges with the parent's slots
-write_manifest(ctx.path / LAYER_MANIFEST, manifest)
-(ctx.path / CONTAINER_RECORD).unlink()
-ctx.path.rename(layer_path)
+manifest = build_manifest(driver, ctr_ctx, artifacts)     # merges with the parent's slots
+write_manifest(ctr_ctx.path / LAYER_MANIFEST, manifest)
+(ctr_ctx.path / CONTAINER_RECORD).unlink()
+ctr_ctx.path.rename(layer_path)
 ```
 
 `Izba.commit()` (`izba commit`) does all of this, and also refuses a running
 container, indexes the layer by name and sha256, and removes the socket
 folder. Prefer it over finishing by hand.
 
-microvm hashes the kernel and initrd straight out of the new root, and only
-writes one to the blob store when its hash is new. It keeps `state.bin` only
+microvm streams the kernel and initrd out of the new root into `boot/`,
+hashing as it goes, and keeps a file only when its hash differs from the
+parent's (an import always keeps both). It keeps `state.bin` only
 if the container was never started.
 
 ### start_container
 
 ```python
-def start_container(self, izba, ctx, exist_ok=False, **opts)
+def start_container(self, izba, ctr_ctx, exist_ok=False, **opts)
 ```
 
 Starts the container and returns once it's launched. It doesn't wait for the
@@ -429,14 +399,14 @@ start it:
 ```python
 from thirdparty.izba.layer import Layer
 
-layer = Layer.load(layer_path, izba.blobs)
+layer = Layer.load(layer_path)
 driver = drivers.create(layer.driver)
-ctx = new_context(izba, driver, layer)
-driver.create_container(izba, ctx)
+ctr_ctx = new_context(izba, driver, layer)
+driver.create_container(izba, ctr_ctx)
 
-driver.start_container(izba, ctx)                  # first start: resumes the layer's RAM snapshot
-driver.start_container(izba, ctx, exist_ok=True)   # already running: no-op
-driver.start_container(izba, ctx)
+driver.start_container(izba, ctr_ctx)                  # first start: resumes the layer's RAM snapshot
+driver.start_container(izba, ctr_ctx, exist_ok=True)   # already running: no-op
+driver.start_container(izba, ctr_ctx)
 # FileExistsError: 01a1de62de5e… is already running (pid 2472607). Run stop first.
 ```
 
@@ -449,16 +419,16 @@ Called by `Izba.start()` (`izba start`) and `Izba.run()`.
 ### container_ready_wait
 
 ```python
-def container_ready_wait(self, izba, ctx, **opts)
+def container_ready_wait(self, izba, ctr_ctx, **opts)
 ```
 
 Blocks until a started container can take `exec_container` calls. Raises on
 timeout, or if the container dies while waiting.
 
 ```python
-driver.start_container(izba, ctx)
-driver.container_ready_wait(izba, ctx)
-driver.exec_container(izba, ctx, command=["uname", "-r"])
+driver.start_container(izba, ctr_ctx)
+driver.container_ready_wait(izba, ctr_ctx)
+driver.exec_container(izba, ctr_ctx, command=["uname", "-r"])
 ```
 
 microvm retries `ssh … true` for up to 5 minutes. A resumed snapshot is
@@ -469,7 +439,7 @@ Called by `Izba.run()`. `Izba.exec()` (`izba exec`) doesn't call it.
 ### exec_container
 
 ```python
-def exec_container(self, izba, ctx, user='user', command=None, stdin=None, **opts) -> bool
+def exec_container(self, izba, ctr_ctx, user='user', command=None, stdin=None, **opts) -> bool
 ```
 
 Runs a command in a running container and returns `True` if it exited 0.
@@ -482,20 +452,20 @@ Runs a command in a running container and returns `True` if it exited 0.
 ```python
 import subprocess
 
-driver.exec_container(izba, ctx, command=["cat", "/etc/izba-layer-x"])   # prints layer-x, returns True
-driver.exec_container(izba, ctx, user="root", command=["id", "-un"])     # root
-driver.exec_container(izba, ctx, command=["sh"], stdin=b"echo hi from stdin\n")
-driver.exec_container(izba, ctx)                                         # interactive shell
+driver.exec_container(izba, ctr_ctx, command=["cat", "/etc/izba-layer-x"])   # prints layer-x, returns True
+driver.exec_container(izba, ctr_ctx, user="root", command=["id", "-un"])     # root
+driver.exec_container(izba, ctr_ctx, command=["sh"], stdin=b"echo hi from stdin\n")
+driver.exec_container(izba, ctr_ctx)                                         # interactive shell
 
 # microvm only: also save the command to artifacts/exec-<name>.sh
-driver.exec_container(izba, ctx, command=["jq", "--version"],
+driver.exec_container(izba, ctr_ctx, command=["jq", "--version"],
                       stdin=subprocess.DEVNULL, artifact_name="jq-version")
 ```
 
 Raises `FileNotFoundError` if the container isn't running:
 
 ```python
-driver.exec_container(izba, ctx, command=["true"])
+driver.exec_container(izba, ctr_ctx, command=["true"])
 # FileNotFoundError: Container 01a1de62de5e… is not running
 ```
 
@@ -504,7 +474,7 @@ Called by `Izba.exec()` (`izba exec`) and `Izba.run()`.
 ### container_is_running
 
 ```python
-def container_is_running(self, izba, ctx) -> bool
+def container_is_running(self, izba, ctr_ctx) -> bool
 ```
 
 Answers whether the container's runtime is alive. Izba checks it before
@@ -512,26 +482,26 @@ commit, after provision, and in `rm` and `run`, so it must be cheap and free
 of side effects.
 
 ```python
-driver.container_is_running(izba, ctx)       # True
-driver.stop_container(izba, ctx)
-driver.container_is_running(izba, ctx)       # False
+driver.container_is_running(izba, ctr_ctx)       # True
+driver.stop_container(izba, ctr_ctx)
+driver.container_is_running(izba, ctr_ctx)       # False
 ```
 
-microvm reads `qemu.pid` in `ctx.socket_path` and checks that the process is
+microvm reads `qemu.pid` in `ctr_ctx.socket_path` and checks that the process is
 alive and really is qemu.
 
 ### stop_container
 
 ```python
-def stop_container(self, izba, ctx, **opts)
+def stop_container(self, izba, ctr_ctx, **opts)
 ```
 
 Stops the container and blocks until it's down. Stopping a stopped container
 isn't an error.
 
 ```python
-driver.stop_container(izba, ctx)
-driver.stop_container(izba, ctx)     # already stopped: logs it, returns normally
+driver.stop_container(izba, ctr_ctx)
+driver.stop_container(izba, ctr_ctx)     # already stopped: logs it, returns normally
 ```
 
 microvm sends SIGTERM to qemu, then SIGKILL after 30 seconds. That isn't a
@@ -552,8 +522,8 @@ and the build boots don't run:
 
 ```python
 class IzbaCrtDriver(IzbaMicroVmDriver):
-    def build_izba_init(self, izba, ctx, spec, callbacks={}, **opts):
-        if not super().build_izba_init(izba, ctx, spec, callbacks=callbacks, **opts):
+    def build_izba_init(self, izba, ctr_ctx, spec, callbacks={}, **opts):
+        if not super().build_izba_init(izba, ctr_ctx, spec, callbacks=callbacks, **opts):
             return False
         import thirdparty.qemu.cloud_init.cloud_config as cc
         self.cloud_init_user_data.packages.append(cc.PackageItemDefinition(root="podman"))
@@ -562,23 +532,23 @@ class IzbaCrtDriver(IzbaMicroVmDriver):
 
 | Hook | Runs in | Typical use |
 |---|---|---|
-| `build_izba_data(izba, ctx, spec, …)` | `provision_container` | keys, files for the seed |
-| `build_izba_init(izba, ctx, spec, …)` | `provision_container` | edit `self.cloud_init_user_data` / `self.cloud_init_meta_data` |
-| `build_izba_bundle(izba, ctx, spec, …)` | `provision_container` | add files to `ctx.path / "context"` before the seed is written |
-| `build_izba(izba, ctx, spec, …)` | `provision_container` | the two build boots and the snapshot |
+| `build_izba_data(izba, ctr_ctx, spec, …)` | `provision_container` | keys, files for the seed |
+| `build_izba_init(izba, ctr_ctx, spec, …)` | `provision_container` | edit `self.cloud_init_user_data` / `self.cloud_init_meta_data` |
+| `build_izba_bundle(izba, ctr_ctx, spec, …)` | `provision_container` | add files to `ctr_ctx.path / "context"` before the seed is written |
+| `build_izba(izba, ctr_ctx, spec, …)` | `provision_container` | the two build boots and the snapshot |
 
 **Callbacks.** Pass them as `callbacks={…}` to `provision_container` or
 `start_container`:
 
 | Key | Signature | Called |
 |---|---|---|
-| `build_izba_data_cb` | `(driver, izba, ctx)` | end of `build_izba_data` |
-| `build_izba_init_cloud_config_cb` | `(driver, izba, ctx, user_data) -> user_data` | after the provision spec is applied |
-| `build_izba_init_meta_data_cb` | `(driver, izba, ctx, meta_data) -> meta_data` | after meta-data is built |
-| `build_izba_bundle_cb` | `(driver, izba, ctx)` | before the seed image is made |
-| `build_izba_provision_qemu_cmd_cb` | `(driver, izba, ctx, qemu_cmd)` | qemu command, first (cloud-init) boot |
-| `build_izba_snapshot_qemu_cmd_cb` | `(driver, izba, ctx, qemu_cmd)` | qemu command, snapshot boot |
-| `start_izba_qemu_cmd_cb` | `(driver, izba, ctx, qemu_cmd)` | qemu command, `start_container` |
+| `build_izba_data_cb` | `(driver, izba, ctr_ctx)` | end of `build_izba_data` |
+| `build_izba_init_cloud_config_cb` | `(driver, izba, ctr_ctx, user_data) -> user_data` | after the provision spec is applied |
+| `build_izba_init_meta_data_cb` | `(driver, izba, ctr_ctx, meta_data) -> meta_data` | after meta-data is built |
+| `build_izba_bundle_cb` | `(driver, izba, ctr_ctx)` | before the seed image is made |
+| `build_izba_provision_qemu_cmd_cb` | `(driver, izba, ctr_ctx, qemu_cmd)` | qemu command, first (cloud-init) boot |
+| `build_izba_snapshot_qemu_cmd_cb` | `(driver, izba, ctr_ctx, qemu_cmd)` | qemu command, snapshot boot |
+| `start_izba_qemu_cmd_cb` | `(driver, izba, ctr_ctx, qemu_cmd)` | qemu command, `start_container` |
 
 A device added in the snapshot boot must also be added at start, or resuming
 the snapshot fails:
@@ -586,14 +556,14 @@ the snapshot fails:
 ```python
 from pathlib import Path
 
-def share_src(driver, izba, ctx, qemu_cmd):
+def share_src(driver, izba, ctr_ctx, qemu_cmd):
     # Must exist for every container started from the layer, not just this one.
     qemu_cmd.add_9p_share(Path.home() / "src", mount_tag="src")
 
-driver.provision_container(izba, ctx, spec,
+driver.provision_container(izba, ctr_ctx, spec,
                            callbacks={"build_izba_snapshot_qemu_cmd_cb": share_src})
 # … commit, then for every container of the new layer:
-driver.start_container(izba, ctx, callbacks={"start_izba_qemu_cmd_cb": share_src})
+driver.start_container(izba, ctr_ctx, callbacks={"start_izba_qemu_cmd_cb": share_src})
 ```
 
 ## Writing a driver
@@ -601,7 +571,7 @@ driver.start_container(izba, ctx, callbacks={"start_izba_qemu_cmd_cb": share_src
 1. Subclass `IzbaAbstractBaseDriver`, or `IzbaMicroVmDriver` to keep the
    `microvm/1` layout and only change what goes into the guest.
 2. Set `layer_format` and `slots`. Don't define `name`.
-3. Implement the calls above (`resolve_source` is optional), raising on failure.
+3. Implement the calls above, raising on failure.
 4. Register it under a name with an entry point:
 
 ```python
@@ -613,8 +583,8 @@ def register_driver_devbox(driver_index: DriverIndex):
     driver_index.register_driver_class('devbox', IzbaDevboxDriver)
 
 class IzbaDevboxDriver(IzbaMicroVmDriver):
-    def build_izba_init(self, izba, ctx, spec, callbacks={}, **opts):
-        if not super().build_izba_init(izba, ctx, spec, callbacks=callbacks, **opts):
+    def build_izba_init(self, izba, ctr_ctx, spec, callbacks={}, **opts):
+        if not super().build_izba_init(izba, ctr_ctx, spec, callbacks=callbacks, **opts):
             return False
         self.cloud_init_user_data.runcmd[-1:-1] = ["apt-get install -y build-essential"]
         return True

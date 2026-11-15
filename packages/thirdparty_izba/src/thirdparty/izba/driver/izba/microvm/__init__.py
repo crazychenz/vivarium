@@ -6,14 +6,23 @@ log = logging.getLogger(__name__)
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Sequence, Tuple, Union
 from thirdparty.izba.driver.izba.microvm.microvm import CommonQemuPaths, QemuMicroVmCommand
 from thirdparty.izba.layer import CHAIN, INHERIT, LOCAL
 
+if TYPE_CHECKING:
+    import thirdparty.qemu.cloud_init.cloud_config as cc
+    from thirdparty.izba import Izba
+    from thirdparty.izba.container import ContainerContext
+
+
 from thirdparty.izba.driver import DriverIndex
-def register_driver_microvm(driver_index: DriverIndex):
+def register_driver_microvm(driver_index: DriverIndex) -> None:
     driver_index.register_driver_class('microvm', IzbaMicroVmDriver)
 
-def _run_with_timeout(args, timeout, logfile):
+
+def _run_with_timeout(args: Sequence[str], timeout: float,
+                      logfile: Union[str, Path]) -> Tuple[Optional[int], str, bool]:
     # TODO: I don't like that this exist!
     """Run `args` with stdout+stderr written to `logfile`; kill it after `timeout`.
 
@@ -28,56 +37,12 @@ def _run_with_timeout(args, timeout, logfile):
     return proc.returncode, logfile.read_text(errors="replace"), timedout
 
 
-def _run_qemu_and_follow(args, console_fpath, pidfile_fpath, idle=60):
-    # TODO: I don't like that this exist!
-    """Start a daemonizing qemu, then follow its console until it exits or goes idle.
-
-    Shows the console (DEBUG logging) or a spinner. Returns watch_host_process()'s
-    status: "exited" or "idle".
-    """
-    from thirdparty.izba.subprocess import run_host_process, watch_host_process
-
-    Path(pidfile_fpath).unlink(missing_ok=True)
-    # -daemonize: the launcher exits once qemu is up and has written its pidfile.
-    proc = run_host_process(args, pidfile=pidfile_fpath)
-    rc = proc.wait()
-    if rc != 0:
-        raise RuntimeError(f"qemu exited with {rc}")
-    follow = "tail" if log.isEnabledFor(logging.DEBUG) else "spinner"
-    return watch_host_process(pidfile_fpath, logfile=console_fpath, follow=follow, idle=idle)
-
-
-def _qemu_img(cmd, log_fpath, timeout=30):
-    '''Run a thirdparty.qemu.img command, keeping a replayable script + log. Raises on failure.'''
-    log.debug(cmd.to_shell())
-    log_fpath = Path(log_fpath)
-    log_fpath.with_suffix(".sh").write_text(f"#!/bin/sh\n\n{cmd.to_shell()}\n")
-    rc, out, timedout = _run_with_timeout(cmd.to_args(), timeout, log_fpath.with_suffix(".log"))
-    if rc != 0 or timedout:
-        raise RuntimeError(f"{cmd.to_shell()} failed (rc {rc}, timedout {timedout}):\n{out}")
-
-
-def _rotate_console(cqpath):
+def _rotate_console(cqpath: CommonQemuPaths) -> None:
     import time
     real_log_fpath = cqpath.logs / "console" / f"console-{time.time_ns()}.log"
     real_log_fpath.touch()
     cqpath.console.unlink(missing_ok=True)
     cqpath.console.symlink_to(os.path.relpath(real_log_fpath, cqpath.console.parent))
-
-
-def _bootfiles_map(bootfiles):
-    '''Config used to list [kernel, initrd]; slots want {kernel: ..., initrd: ...}.'''
-    if isinstance(bootfiles, dict):
-        return dict(bootfiles)
-    kernel, initrd = bootfiles
-    return {"kernel": kernel, "initrd": initrd}
-
-
-def _to_hostname_label(text):
-    '''Best-effort hostname label from arbitrary text (e.g. "vivarium_agentvm").'''
-    import re
-    label = re.sub(r"[^a-z0-9-]+", "-", text.lower()).strip("-")
-    return label[:63].rstrip("-") or "izba"
 
 
 from thirdparty.izba.driver.izba import IzbaAbstractBaseDriver
@@ -89,7 +54,8 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         images/seed.iso     inherit cloud-init NoCloud seed (devices must match the snapshot)
         misc/ssh/id_ed25519 inherit (ssh_pubkey value alongside)
     plus inherit slots that never exist as files in the folder:
-        kernel, initrd      blobs read out of root at commit (see _commit_bootfiles)
+        boot/kernel         inherit read out of root at commit when changed (see _commit_bootfiles)
+        boot/initrd         inherit
         root_device         where the kernel finds the root filesystem (root= kernel arg)
         instance_prefix     cloud-init instance-id prefix (only when a spec set one)
         hostname            guest hostname (only when a spec set one)
@@ -113,7 +79,7 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         "bootfiles": INHERIT,
     }
 
-    def __init__(self, **opts):
+    def __init__(self, **opts: Any) -> None:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         # Populated during provision_container (hooks mutate these).
@@ -123,71 +89,22 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
 
     # --- helpers ---
 
-    def _artifact(self, ctx, slot, required=True):
+    def _artifact(self, ctr_ctx: "ContainerContext", slot: str, required: bool = True) -> Optional[Path]:
         '''Container's own copy of an inherit slot if present, else the parent layer's.'''
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
         local = {
             "seed": cqpath.seed,
             "identity": cqpath.identity,
         }.get(slot)
-        path = ctx.artifact(slot, local)
+        path = ctr_ctx.artifact(slot, local)
         if path is None and required:
-            raise FileNotFoundError(f"Container {ctx.id.hex} has no {slot!r} (not built/provisioned?)")
+            raise FileNotFoundError(f"Container {ctr_ctx.id.hex} has no {slot!r} (not built/provisioned?)")
         return path
+     
 
-
-    def _cache_download(self, izba, distro, platform="linux", arch="x64"):
-        '''Download (once) a distro image into downloads/by_sha256. Returns
-        (path, config entry); path is downloads/by_sha256/<sha256 of the file>.'''
-        downloads = izba.config['downloads'][f'{platform}-{arch}']
-        if distro not in downloads:
-            raise KeyError(f"no download for {distro!r} on {platform}-{arch}; have {sorted(downloads)}")
-        entry = downloads[distro]
-
-        from thirdparty.izba.uuid import uuid7
-        from thirdparty.izba.layer import file_sha256
-        import shutil
-
-        by_name = izba.downloads_path / "by_name" / entry['cache']
-        if not by_name.exists():
-            partial = (izba.downloads_path / "partial" / uuid7().hex).resolve()
-            partial.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                # Raises on any failure.
-                from thirdparty.izba.download import download_with_progress
-                download_with_progress(url=entry['upstream'], dest_path=partial)
-            except BaseException:
-                partial.unlink(missing_ok=True)
-                # download_with_progress implicitly uses .part
-                partial.with_name(partial.name + ".part").unlink(missing_ok=True)
-                raise
-
-            by_sha256 = izba.downloads_path / "by_sha256" / file_sha256(partial)
-            by_sha256.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(partial, by_sha256)
-
-            by_name.parent.mkdir(parents=True, exist_ok=True)
-            by_name.unlink(missing_ok=True)
-            by_name.symlink_to(os.path.relpath(by_sha256, by_name.parent))
-
-        return by_name.resolve(), entry
-
-
-    def _create_root(self, cqpath, backing, size=None):
-        '''images/root.qcow2 backed by `backing`, referenced by a path relative
-        to the images folder (rebased again at commit).'''
-        import thirdparty.qemu.img as qimg
-        _qemu_img(qimg.Create(
-            quiet=True,
-            format="qcow2",
-            backing_format="qcow2",
-            backing_file=os.path.relpath(Path(backing).resolve(), cqpath.images),
-            filename=cqpath.root,
-            size=size,
-        ), cqpath.artifacts / "create_root")
-
-
-    def _qemu_command(self, izba, ctx, cqpath, ssh_host_port, incoming=None, qemu_cmd_cb=None):
+    def _qemu_command(self, izba: "Izba", ctr_ctx: "ContainerContext", cqpath: CommonQemuPaths,
+                      ssh_host_port: int, incoming: Optional[Path] = None,
+                      qemu_cmd_cb: Optional[Callable[..., Any]] = None) -> QemuMicroVmCommand:
         '''The one qemu command line for this container. Build, first boot and
         resume all use it so the device set always matches the RAM snapshot.'''
         qemu_cmd = QemuMicroVmCommand(
@@ -195,17 +112,17 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
             qmp_path=cqpath.qmp,
             pidfile_path=cqpath.pidfile,
         )
-        qemu_cmd.boot_with(self._artifact(ctx, "kernel"), self._artifact(ctx, "initrd"))
-        for key, value in (ctx.value("cmdline") or {}).items():
+        qemu_cmd.boot_with(self._artifact(ctr_ctx, "kernel"), self._artifact(ctr_ctx, "initrd"))
+        for key, value in (ctr_ctx.value("cmdline") or {}).items():
             qemu_cmd.set_kernel_arg(key, value)
         # After cmdline, so root_device is authoritative for root=.
-        root_device = ctx.value("root_device")
+        root_device = ctr_ctx.value("root_device")
         if root_device:
             qemu_cmd.set_kernel_arg('root', root_device)
         qemu_cmd.add_qcow2_disk(cqpath.root)
-        # Read-only everywhere: once committed the seed is a read-only blob,
+        # Read-only everywhere: once committed the seed is a read-only layer file,
         # and the flag is guest visible so it must match the RAM snapshot.
-        qemu_cmd.add_raw_disk(self._artifact(ctx, "seed"), readonly=True)
+        qemu_cmd.add_raw_disk(self._artifact(ctr_ctx, "seed"), readonly=True)
         mgmt = qemu_cmd.add_user_netdev(restrict=False)
         qemu_cmd.add_hostfwd(mgmt, host_port=ssh_host_port, guest_port=22)
         # TODO: This tunnel is only for agent.
@@ -217,137 +134,131 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         #qemu_cmd.sandbox()
 
         if qemu_cmd_cb:
-            qemu_cmd_cb(self, izba, ctx, qemu_cmd)
+            qemu_cmd_cb(self, izba, ctr_ctx, qemu_cmd)
         return qemu_cmd
 
 
-    def _launch(self, cqpath, qemu_cmd, script_name):
-        '''Start a daemonizing qemu with stderr captured. Returns its pid.'''
-        from thirdparty.izba.subprocess import run_host_process, read_pid
-
-        log.debug(f"{script_name} qemu command: {qemu_cmd.to_shell()}")
-        (cqpath.artifacts / f"{script_name}.sh").write_text(f"#!/bin/sh\n\n{qemu_cmd.to_shell()}\n")
-        cqpath.pidfile.unlink(missing_ok=True)
-        cqpath.stderr_log.unlink(missing_ok=True)  # run_host_process appends; keep just this run
-        # -daemonize: the launcher exits once qemu is up and has written its
-        # pidfile; the daemon keeps writing its errors to the same log.
-        proc = run_host_process(qemu_cmd.to_args(), stdout=cqpath.stderr_log,
-                                stderr=cqpath.stderr_log, pidfile=cqpath.pidfile)
-        rc = proc.wait()
-        if rc != 0:
-            raise RuntimeError(f"qemu exited with {rc}:\n{cqpath.stderr_log.read_text()}")
-        return read_pid(cqpath.pidfile)
-
-
-    def _ssh_conn(self, ctx, cqpath, user='user'):
+    def _ssh_conn(self, ctr_ctx: "ContainerContext", cqpath: CommonQemuPaths,
+                  user: str = 'user') -> Dict[str, Any]:
         return dict(
             destination=f'{user}@127.0.0.1',
             port=int(cqpath.ssh_host_port.read_text().strip()),
-            identity_fpath=self._artifact(ctx, "identity"),
+            identity_fpath=self._artifact(ctr_ctx, "identity"),
         )
 
 
     # --- import (download -> parentless container) ---
 
-    _SOURCE_KEYS = ("import", "platform", "arch")
-
-    def _resolve_source(self, izba, source):
-        '''Fill in defaults for an import source:
-
-            {"import": "<distro>",         # key into config['downloads']['<platform>-<arch>']
-             "platform": "linux",
-             "arch": "x64"}
-
-        The source identifies what is imported; two imports with equal
-        resolved sources are interchangeable. Options such as size are not
-        part of it (see import_container).'''
-        if isinstance(source, str):
-            source = {"import": source}
-        unknown = set(source) - set(self._SOURCE_KEYS)
-        if unknown:
-            raise ValueError(f"Unknown import source keys {sorted(unknown)}; "
-                             f"expected {list(self._SOURCE_KEYS)}")
-        if "import" not in source:
-            raise ValueError(f"Import source {source!r} has no 'import' (distro) key.")
-
-        resolved = {"platform": "linux", "arch": "x64", **source}
-        downloads = izba.config['downloads'].get(f"{resolved['platform']}-{resolved['arch']}", {})
-        if resolved["import"] not in downloads:
-            raise KeyError(f"no download for {resolved['import']!r} on "
-                           f"{resolved['platform']}-{resolved['arch']}; have {sorted(downloads)}")
-        return {k: resolved[k] for k in self._SOURCE_KEYS}
-
-
-    def import_container(self, izba, ctx, source, size="10G", **opts):
-        '''size: root disk size, a user preference (not part of the source).'''
+    def import_container(self, izba: "Izba", ctr_ctx: "ContainerContext", source: Dict[str, Any],
+                         size: str = "10G", **opts: Any) -> bool:
+        '''source: {"import": <distro>, "platform_arch": <key, default linux-x64>},
+        keys into config['downloads'][platform_arch][distro].
+        size: root disk size, a user preference (not part of the source).'''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        from thirdparty.izba.config import DEFAULT_PLATFORM_ARCH
 
-        # *User expected to provide {"import": "ubuntu"} for source.
-        # *_resolve_source fills in other defaults.
-        # TODO: I would rather baseline with a default and merge overrides.
-        source = self._resolve_source(izba, source)
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
+        distro = source["import"]
+        platform_arch = source.get("platform_arch") or DEFAULT_PLATFORM_ARCH
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
         cqpath.make_dirs()
 
         # *Downloads the import if not already downloaded
-        image_path, entry = self._cache_download(izba, source["import"], source["platform"], source["arch"])
-        ctx.record["source"] = {
-            **source,
+        image_path, entry = izba.cache_download(distro, platform_arch)
+        ctr_ctx.record["source"] = {
+            "import": distro,
+            "platform_arch": platform_arch,
             "upstream": entry['upstream'],
             # by_sha256 files are named by their digest
             "sha256": image_path.name,
         }
-        ctx.save_record()
+        ctr_ctx.save_record()
 
-        self._create_root(cqpath, image_path, size=size)
+        import thirdparty.qemu.img as qimg
+        timeout=30
+        cmd = qimg.Create(
+            quiet=True,
+            format="qcow2",
+            backing_format="qcow2",
+            backing_file=os.path.relpath(Path(image_path).resolve(), cqpath.images),
+            filename=cqpath.root,
+            size=size,
+        )
+        log.debug(cmd.to_shell())
+        log_fpath = cqpath.artifacts / "create_root"
+        log_fpath.with_suffix(".sh").write_text(f"#!/bin/sh\n\n{cmd.to_shell()}\n")
+        rc, out, timedout = _run_with_timeout(cmd.to_args(), timeout, log_fpath.with_suffix(".log"))
+        if rc != 0 or timedout:
+            raise RuntimeError(f"{cmd.to_shell()} failed (rc {rc}, timedout {timedout}):\n{out}")
+
+
 
         # Kernel/initrd are read out of root at commit like any other layer.
-        ctx.set_value("bootfiles", _bootfiles_map(entry['bootfiles']))
+        ctr_ctx.set_value("bootfiles", dict(entry['bootfiles']))
         if 'root' not in entry:
             raise KeyError(f"Download entry {source['import']!r} has no 'root' "
                            f"(root filesystem, e.g. 'LABEL=cloudimg-rootfs').")
-        ctx.set_value("root_device", entry['root'])
+        ctr_ctx.set_value("root_device", entry['root'])
         return True
 
 
     # --- create (layer -> container) ---
 
-    def create_container(self, izba, ctx, **opts):
+    def create_container(self, izba: "Izba", ctr_ctx: "ContainerContext", **opts: Any) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
         cqpath.make_dirs()
-        self._create_root(cqpath, ctx.parent.artifact("root"))
+
+        image_path = ctr_ctx.parent.artifact("root")
+        import thirdparty.qemu.img as qimg       
+        timeout=30
+        cmd=qimg.Create(
+            quiet=True,
+            format="qcow2",
+            backing_format="qcow2",
+            backing_file=os.path.relpath(Path(image_path).resolve(), cqpath.images),
+            filename=cqpath.root,
+            size=None,
+        )
+        log.debug(cmd.to_shell())
+        log_fpath = cqpath.artifacts / "create_root"
+        log_fpath.with_suffix(".sh").write_text(f"#!/bin/sh\n\n{cmd.to_shell()}\n")
+        rc, out, timedout = _run_with_timeout(cmd.to_args(), timeout, log_fpath.with_suffix(".log"))
+        if rc != 0 or timedout:
+            raise RuntimeError(f"{cmd.to_shell()} failed (rc {rc}, timedout {timedout}):\n{out}")
+
         return True
 
 
     # --- provision (build hooks) ---
 
-    def build_izba_data(self, izba, ctx, spec, callbacks={}, **opts):
+    def build_izba_data(self, izba: "Izba", ctr_ctx: "ContainerContext", spec: Dict[str, Any],
+                        callbacks: Dict[str, Callable[..., Any]] = {}, **opts: Any) -> bool:
         '''Prepare everything the guest init needs (keys, files for the seed).'''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
 
         # Reuse the parent's identity so every layer of a chain answers to the same key.
-        if self._artifact(ctx, "identity", required=False) is None:
+        if self._artifact(ctr_ctx, "identity", required=False) is None:
             from thirdparty.izba.keys import generate_ssh_keys
             generate_ssh_keys(cqpath.identity.parent)
-            ctx.set_value("ssh_pubkey", (cqpath.identity.parent / "id_ed25519.pub").read_text())
+            ctr_ctx.set_value("ssh_pubkey", (cqpath.identity.parent / "id_ed25519.pub").read_text())
 
         # Allows custom behaviors from user without deriving their own driver class.
         build_izba_data_cb = callbacks.get('build_izba_data_cb', None)
         if build_izba_data_cb:
-            build_izba_data_cb(self, izba, ctx)
+            build_izba_data_cb(self, izba, ctr_ctx)
         return True
 
 
-    def build_izba_init(self, izba, ctx, spec, callbacks={}, **opts):
+    def build_izba_init(self, izba: "Izba", ctr_ctx: "ContainerContext", spec: Dict[str, Any],
+                        callbacks: Dict[str, Callable[..., Any]] = {}, **opts: Any) -> bool:
         '''Build cloud-init user-data and meta-data for this layer.'''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         import thirdparty.qemu.cloud_init.cloud_config as cc
 
-        self.cloud_init_user_data = self._build_base_cloud_config(izba, ctx, ctx.value("ssh_pubkey"))
+        self.cloud_init_user_data = self._build_base_cloud_config(izba, ctr_ctx, ctr_ctx.value("ssh_pubkey"))
 
         provision = spec.get("provision", {}) or {}
         for pkgname in provision.get("packages", []):
@@ -359,24 +270,24 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         # Allows custom behaviors from user without deriving their own driver class.
         cloud_config_cb = callbacks.get('build_izba_init_cloud_config_cb', None)
         if cloud_config_cb:
-            self.cloud_init_user_data = cloud_config_cb(self, izba, ctx, self.cloud_init_user_data)
+            self.cloud_init_user_data = cloud_config_cb(self, izba, ctr_ctx, self.cloud_init_user_data)
 
-        prefix, hostname = self._instance_names(ctx, provision)
+        prefix, hostname = self._instance_names(ctr_ctx, provision)
         # A new instance-id per layer makes cloud-init run again on top of the parent.
         self.cloud_init_meta_data = {
-            'instance-id': f'{prefix}-{ctx.id.hex}',
+            'instance-id': f'{prefix}-{ctr_ctx.id.hex}',
             'local-hostname': hostname,
         }
 
         # Allows custom behaviors from user without deriving their own driver class.
         meta_data_cb = callbacks.get('build_izba_init_meta_data_cb', None)
         if meta_data_cb:
-            self.cloud_init_meta_data = meta_data_cb(self, izba, ctx, self.cloud_init_meta_data)
+            self.cloud_init_meta_data = meta_data_cb(self, izba, ctr_ctx, self.cloud_init_meta_data)
 
         return True
 
 
-    def _instance_names(self, ctx, provision):
+    def _instance_names(self, ctr_ctx: "ContainerContext", provision: Dict[str, Any]) -> Tuple[str, str]:
         '''(instance prefix, hostname) for this layer.
 
         provision.instance_prefix / provision.hostname set them (and are
@@ -387,21 +298,27 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
             if not _INSTANCE_PREFIX_RE.fullmatch(prefix):
                 raise ValueError(f"provision.instance_prefix {prefix!r}: use letters, digits, "
                                  f"'.', '_' or '-' (max 63, starting with a letter or digit).")
-            ctx.set_value("instance_prefix", prefix)
+            ctr_ctx.set_value("instance_prefix", prefix)
         if "hostname" in provision:
             hostname = str(provision["hostname"])
             from thirdparty.izba.network import is_hostname
             if not is_hostname(hostname):
                 raise ValueError(f"provision.hostname {hostname!r} is not a valid hostname "
                                  f"(RFC 1123: labels of letters, digits and '-').")
-            ctx.set_value("hostname", hostname)
+            ctr_ctx.set_value("hostname", hostname)
 
-        prefix = ctx.value("instance_prefix") or self.name
-        hostname = ctx.value("hostname") or f"{_to_hostname_label(prefix)[:54]}-{ctx.id.hex[-8:]}"
+        prefix = ctr_ctx.value("instance_prefix") or self.name
+
+        import re
+        label = re.sub(r"[^a-z0-9-]+", "-", prefix.lower()).strip("-")
+        hostname_label = label[:63].rstrip("-") or "izba"
+
+        hostname = ctr_ctx.value("hostname") or f"{hostname_label[:54]}-{ctr_ctx.id.hex[-8:]}"
         return prefix, hostname
 
 
-    def build_izba_bundle(self, izba, ctx, spec, callbacks={}, **opts):
+    def build_izba_bundle(self, izba: "Izba", ctr_ctx: "ContainerContext", spec: Dict[str, Any],
+                          callbacks: Dict[str, Callable[..., Any]] = {}, **opts: Any) -> bool:
         '''Write the seed (cloud-init NoCloud) image.'''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
@@ -409,7 +326,7 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         from thirdparty.qemu.cloud_init.cloud_config import cloud_config_to_yaml
         import yaml
 
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
 
         (cqpath.context / "user-data").write_text(cloud_config_to_yaml(self.cloud_init_user_data))
         (cqpath.context / "meta-data").write_text(yaml.dump(self.cloud_init_meta_data))
@@ -418,13 +335,15 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
 
         build_izba_bundle_cb = callbacks.get('build_izba_bundle_cb', None)
         if build_izba_bundle_cb:
-            build_izba_bundle_cb(self, izba, ctx)
+            build_izba_bundle_cb(self, izba, ctr_ctx)
 
         make_seed(path=cqpath.seed, tree=cqpath.context)
         return True
 
 
-    def build_izba(self, izba, ctx, spec, callbacks={}, build_idle=300, **opts):
+    def build_izba(self, izba: "Izba", ctr_ctx: "ContainerContext", spec: Dict[str, Any],
+                   callbacks: Dict[str, Callable[..., Any]] = {}, build_idle: float = 300,
+                   **opts: Any) -> bool:
         '''Boot twice: first boot runs cloud-init and powers off (reboot exits
         qemu), second boot waits for ssh and saves RAM state to images/state.bin.'''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
@@ -432,7 +351,7 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         from thirdparty.izba.network import find_free_port
         from thirdparty.izba.subprocess import read_pid, kill_pid, watch_host_process
 
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
         cqpath.state.unlink(missing_ok=True)
 
         # --- First boot: cloud-init provisioning ---
@@ -440,10 +359,21 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         _rotate_console(cqpath)
         ssh_host_port = find_free_port(2222)
         cqpath.ssh_host_port.write_text(f"{ssh_host_port}\n")
-        qemu_cmd = self._qemu_command(izba, ctx, cqpath, ssh_host_port,
+        qemu_cmd = self._qemu_command(izba, ctr_ctx, cqpath, ssh_host_port,
                                       qemu_cmd_cb=callbacks.get('build_izba_provision_qemu_cmd_cb'))
         (cqpath.artifacts / "qemu_provision.sh").write_text(f"#!/bin/sh\n\n{qemu_cmd.to_shell()}\n")
-        status = _run_qemu_and_follow(qemu_cmd.to_args(), cqpath.console, cqpath.pidfile, idle=build_idle)
+
+        # *run and follow qemu    
+        from thirdparty.izba.subprocess import run_host_process, watch_host_process
+        cqpath.pidfile.unlink(missing_ok=True)
+        # -daemonize: the launcher exits once qemu is up and has written its pidfile.
+        proc = run_host_process(qemu_cmd.to_args(), pidfile=cqpath.pidfile)
+        rc = proc.wait()
+        if rc != 0:
+            raise RuntimeError(f"qemu exited with {rc}")
+        follow = "tail" if log.isEnabledFor(logging.DEBUG) else "spinner"
+        status = watch_host_process(cqpath.pidfile, logfile=cqpath.console, follow=follow, idle=build_idle)
+
         if status != "exited":
             pid = read_pid(cqpath.pidfile)
             if pid:
@@ -456,13 +386,27 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         _rotate_console(cqpath)
         ssh_host_port = find_free_port(2222)
         cqpath.ssh_host_port.write_text(f"{ssh_host_port}\n")
-        qemu_cmd = self._qemu_command(izba, ctx, cqpath, ssh_host_port,
+        qemu_cmd = self._qemu_command(izba, ctr_ctx, cqpath, ssh_host_port,
                                       qemu_cmd_cb=callbacks.get('build_izba_snapshot_qemu_cmd_cb'))
-        qemu_pid = self._launch(cqpath, qemu_cmd, "qemu_snapshot")
+
+        from thirdparty.izba.subprocess import run_host_process, read_pid
+
+        log.debug(f"qemu_snapshot qemu command: {qemu_cmd.to_shell()}")
+        (cqpath.artifacts / "qemu_snapshot.sh").write_text(f"#!/bin/sh\n\n{qemu_cmd.to_shell()}\n")
+        cqpath.pidfile.unlink(missing_ok=True)
+        cqpath.stderr_log.unlink(missing_ok=True)  # run_host_process appends; keep just this run
+        # -daemonize: the launcher exits once qemu is up and has written its
+        # pidfile; the daemon keeps writing its errors to the same log.
+        proc = run_host_process(qemu_cmd.to_args(), stdout=cqpath.stderr_log,
+                                stderr=cqpath.stderr_log, pidfile=cqpath.pidfile)
+        rc = proc.wait()
+        if rc != 0:
+            raise RuntimeError(f"qemu exited with {rc}:\n{cqpath.stderr_log.read_text()}")
+        qemu_pid = read_pid(cqpath.pidfile)
 
         try:
             from thirdparty.izba.subprocess.ssh import ssh_wait
-            ssh_wait("cloud-init status --wait", pidfile=cqpath.pidfile, **self._ssh_conn(ctx, cqpath))
+            ssh_wait("cloud-init status --wait", pidfile=cqpath.pidfile, **self._ssh_conn(ctr_ctx, cqpath))
             # *this is where the state gets snapshot
             self._save_state(cqpath, qemu_pid)
         except BaseException:
@@ -473,7 +417,7 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         return True
 
 
-    def _save_state(self, cqpath, qemu_pid):
+    def _save_state(self, cqpath: CommonQemuPaths, qemu_pid: Optional[int]) -> None:
         # Save RAM + device state by migrating to a file, then quit without
         # resuming the guest. The vCPUs stay stopped from before the migration
         # until exit, so root.qcow2 is exactly the disk state that pairs with
@@ -501,16 +445,17 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
             raise RuntimeError(f"QEMU (pid {qemu_pid}) did not exit after QMP quit")
 
 
-    def provision_container(self, izba, ctx, spec, callbacks={}, **opts):
+    def provision_container(self, izba: "Izba", ctr_ctx: "ContainerContext", spec: Dict[str, Any],
+                            callbacks: Dict[str, Callable[..., Any]] = {}, **opts: Any) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         boot = spec.get("boot", {}) or {}
         if "root" in boot:
-            ctx.set_value("root_device", boot["root"])
+            ctr_ctx.set_value("root_device", boot["root"])
         if "cmdline" in boot:
             if "root" in boot["cmdline"]:
                 raise ValueError("Set the root filesystem with boot.root, not boot.cmdline.root.")
-            ctx.set_value("cmdline", {**(ctx.value("cmdline") or {}), **boot["cmdline"]})
+            ctr_ctx.set_value("cmdline", {**(ctr_ctx.value("cmdline") or {}), **boot["cmdline"]})
 
         # Each hook must return True; anything else (False, or None from an
         # override that forgot to return) stops the build before the next one.
@@ -521,41 +466,49 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
             self.build_izba,
         )
         for hook in ordered_hooks:
-            ret = hook(izba, ctx, spec, callbacks=callbacks, **opts)
+            ret = hook(izba, ctr_ctx, spec, callbacks=callbacks, **opts)
             if ret is not True:
                 raise RuntimeError(f"{type(self).__name__}.{hook.__name__} returned {ret!r}, "
-                                   f"expected True; provisioning of {ctx.id.hex} stopped.")
+                                   f"expected True; provisioning of {ctr_ctx.id.hex} stopped.")
         return True
 
 
     # --- commit (container -> layer) ---
 
-    def commit_container(self, izba, ctx, layer_path, **opts):
+    def commit_container(self, izba: "Izba", ctr_ctx: "ContainerContext", layer_path: Union[str, Path],
+                         **opts: Any) -> Dict[str, Dict[str, Any]]:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        from thirdparty.izba.layer import file_sha256
+        from thirdparty.izba.io import file_sha256
         import thirdparty.qemu.img as qimg
 
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
         layer_images = Path(layer_path) / "images"
 
         # Must run before the rebase below (the backing path is only valid
         # from the container folder until then).
-        artifacts = self._commit_bootfiles(ctx, cqpath)
+        artifacts = self._commit_bootfiles(ctr_ctx, cqpath)
 
         # Point the backing reference to where the parent is as seen from the
         # layer folder. -u only rewrites the header; contents are untouched.
         info = self._root_backing(cqpath)
         if info is not None:
             backing_abs = (cqpath.images / info).resolve()
-            _qemu_img(qimg.Rebase(
+            timeout = 30
+            cmd = qimg.Rebase(
                 quiet=True,
                 unsafe=True,
                 format="qcow2",
                 backing_format="qcow2",
                 backing_file=os.path.relpath(backing_abs, layer_images),
                 filename=cqpath.root,
-            ), cqpath.artifacts / "rebase_root")
+            )
+            log.debug(cmd.to_shell())
+            log_fpath = cqpath.artifacts / "rebase_root"
+            log_fpath.with_suffix(".sh").write_text(f"#!/bin/sh\n\n{cmd.to_shell()}\n")
+            rc, out, timedout = _run_with_timeout(cmd.to_args(), timeout, log_fpath.with_suffix(".log"))
+            if rc != 0 or timedout:
+                raise RuntimeError(f"{cmd.to_shell()} failed (rc {rc}, timedout {timedout}):\n{out}")
 
         artifacts["root"] = {"path": "images/root.qcow2", "sha256": file_sha256(cqpath.root)}
         # A snapshot only pairs with a disk that has not been booted since.
@@ -564,25 +517,29 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         else:
             cqpath.state.unlink(missing_ok=True)
 
-        # Files this container produced move into the blob store (no copy).
+        # Files this container produced stay where they are; the folder becomes
+        # the layer and descendants reference them there (no copies).
         for slot, local, mode in (("seed", cqpath.seed, 0o444),
                                   ("identity", cqpath.identity, 0o400)):
             if local.exists():
-                artifacts[slot] = {"blob": ctx.blobs.put(local, mode=mode, move=True)}
-        (cqpath.identity.parent / "id_ed25519.pub").unlink(missing_ok=True)
+                local.chmod(mode)
+                artifacts[slot] = {"path": local.relative_to(cqpath.container_path).as_posix(),
+                                   "sha256": file_sha256(local)}
 
-        for slot, value in ctx.local_values().items():
+        for slot, value in ctr_ctx.local_values().items():
             artifacts[slot] = {"value": value}
 
         return artifacts
 
 
-    def _commit_bootfiles(self, ctx, cqpath):
+    def _commit_bootfiles(self, ctr_ctx: "ContainerContext",
+                          cqpath: CommonQemuPaths) -> Dict[str, Dict[str, Any]]:
         '''Kernel/initrd are read from the new root so a kernel upgrade in this
-        layer is picked up. Each file is hashed straight out of the guest
-        filesystem; only a never-seen-before one is written, directly into the
-        blob store. Nothing is written for an unchanged kernel.'''
-        bootfiles = ctx.value("bootfiles")
+        layer is picked up. Each file is streamed out of the guest filesystem
+        once (hashed while written to boot/<slot>); if it matches the parent's,
+        the copy is dropped and the parent's entry is inherited. Only a changed
+        kernel/initrd is kept in this layer.'''
+        bootfiles = ctr_ctx.value("bootfiles")
         if not bootfiles:
             return {}
 
@@ -590,31 +547,44 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         from thirdparty.izba.extraction import disk_image_fs
 
         artifacts = {}
+        partial = None
         try:
             fs = disk_image_fs(cqpath.root)
-            for slot, inner in _bootfiles_map(bootfiles).items():
+            for slot, inner in bootfiles.items():
                 src = fs.path(inner)
                 if not src.is_file():
                     raise FileNotFoundError(f"{inner} not found in {cqpath.root}")
+                dest = cqpath.boot / slot
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                partial = dest.with_name(f".{slot}.partial")
                 digest = hashlib.sha256()
-                with src.open("rb") as fobj:
+                with src.open("rb") as fobj, open(partial, "wb") as out:
                     while chunk := fobj.read(1 << 20):
                         digest.update(chunk)
-                ref = f"sha256:{digest.hexdigest()}"
-                if not ctx.blobs.has(ref):
-                    with src.open("rb") as fobj:
-                        ref = ctx.blobs.put_stream(fobj)
-                    log.info(f"New {slot} {ref} from {inner}")
-                artifacts[slot] = {"blob": ref}
+                        out.write(chunk)
+                sha256 = digest.hexdigest()
+                parent_entry = ctr_ctx.parent.entry(slot) if ctr_ctx.parent is not None else None
+                if parent_entry is not None and parent_entry.get("sha256") == sha256:
+                    partial.unlink()
+                    continue  # unchanged: inherit the ancestor's file
+                partial.chmod(0o444)
+                partial.replace(dest)
+                log.info(f"New {slot} sha256:{sha256} from {inner}")
+                artifacts[slot] = {"path": dest.relative_to(cqpath.container_path).as_posix(),
+                                   "sha256": sha256}
         except Exception as e:
-            if ctx.parent is None:
+            if partial is not None:
+                partial.unlink(missing_ok=True)
+            for done in artifacts.values():
+                (cqpath.container_path / done["path"]).unlink(missing_ok=True)
+            if ctr_ctx.parent is None:
                 raise  # an import has nothing to inherit
             log.warning(f"Could not read boot files from {cqpath.root} ({e}); inheriting the parent's.")
             return {}
         return artifacts
 
 
-    def _root_backing(self, cqpath, timeout=30):
+    def _root_backing(self, cqpath: CommonQemuPaths, timeout: float = 30) -> Optional[str]:
         '''Backing file reference stored in root.qcow2 (as written, usually relative).'''
         import json
         import subprocess
@@ -640,7 +610,8 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
 
     # --- running containers ---
 
-    def start_container(self, izba, ctx, exist_ok=False, callbacks={}, **opts):
+    def start_container(self, izba: "Izba", ctr_ctx: "ContainerContext", exist_ok: bool = False,
+                        callbacks: Dict[str, Callable[..., Any]] = {}, **opts: Any) -> bool:
         '''Resume the parent layer's RAM snapshot the first time; cold boot after
         that (the disk no longer matches the snapshot once the guest has run).'''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
@@ -648,37 +619,52 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         from thirdparty.izba.network import find_free_port
         from thirdparty.izba.subprocess import read_pid, is_pid_alive
 
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
 
         pid = read_pid(cqpath.pidfile)
-        if pid is not None and self.container_is_running(izba, ctx):
+        if pid is not None and self.container_is_running(izba, ctr_ctx):
             if exist_ok:
-                log.info(f"{ctx.id.hex} is already running (pid {pid}).")
+                log.info(f"{ctr_ctx.id.hex} is already running (pid {pid}).")
                 return True
-            raise FileExistsError(f"{ctx.id.hex} is already running (pid {pid}). Run stop first.")
+            raise FileExistsError(f"{ctr_ctx.id.hex} is already running (pid {pid}). Run stop first.")
 
-        state = ctx.parent.artifact("state") if ctx.parent is not None else None
+        state = ctr_ctx.parent.artifact("state") if ctr_ctx.parent is not None else None
         resume = state is not None and state.exists() and not cqpath.booted.exists()
 
         _rotate_console(cqpath)
         ssh_host_port = find_free_port(2222)
         cqpath.ssh_host_port.write_text(f"{ssh_host_port}\n")
-        qemu_cmd = self._qemu_command(izba, ctx, cqpath, ssh_host_port,
+        qemu_cmd = self._qemu_command(izba, ctr_ctx, cqpath, ssh_host_port,
                                       incoming=state if resume else None,
                                       qemu_cmd_cb=callbacks.get('start_izba_qemu_cmd_cb'))
-        pid = self._launch(cqpath, qemu_cmd, "qemu_start")
+
+        from thirdparty.izba.subprocess import run_host_process, read_pid
+        log.debug(f"qemu_start qemu command: {qemu_cmd.to_shell()}")
+        (cqpath.artifacts / "qemu_start.sh").write_text(f"#!/bin/sh\n\n{qemu_cmd.to_shell()}\n")
+        cqpath.pidfile.unlink(missing_ok=True)
+        cqpath.stderr_log.unlink(missing_ok=True)  # run_host_process appends; keep just this run
+        # -daemonize: the launcher exits once qemu is up and has written its
+        # pidfile; the daemon keeps writing its errors to the same log.
+        proc = run_host_process(qemu_cmd.to_args(), stdout=cqpath.stderr_log,
+                                stderr=cqpath.stderr_log, pidfile=cqpath.pidfile)
+        rc = proc.wait()
+        if rc != 0:
+            raise RuntimeError(f"qemu exited with {rc}:\n{cqpath.stderr_log.read_text()}")
+        pid = read_pid(cqpath.pidfile)
+
         # *marker to prevent this container from reusing parent state.bin
         cqpath.booted.touch()
 
         if resume:
             if not self._resume_microvm_paused_state(cqpath.qmp, pid, state, cqpath.stderr_log):
-                raise RuntimeError(f"Failed to resume {ctx.id.hex} from {state}")
-        log.info(f"Started {ctx.id.hex} ({'resumed' if resume else 'cold boot'}, pid {pid}, "
+                raise RuntimeError(f"Failed to resume {ctr_ctx.id.hex} from {state}")
+        log.info(f"Started {ctr_ctx.id.hex} ({'resumed' if resume else 'cold boot'}, pid {pid}, "
                  f"ssh port {ssh_host_port})")
         return True
 
 
-    def _resume_microvm_paused_state(self, qmp_fpath, pid, state_fpath, qemu_stderr_fpath):
+    def _resume_microvm_paused_state(self, qmp_fpath: Path, pid: Optional[int], state_fpath: Path,
+                                     qemu_stderr_fpath: Path) -> bool:
         import time
         from thirdparty.qemu.qapi import qmp
         from thirdparty.izba.subprocess import is_pid_alive
@@ -711,55 +697,58 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         return True
 
 
-    def container_is_running(self, izba, ctx):
+    def container_is_running(self, izba: "Izba", ctr_ctx: "ContainerContext") -> bool:
         from thirdparty.izba.subprocess import is_pid_alive, read_pid
         from thirdparty.izba.subprocess.qemu import is_qemu_process
-        pid = read_pid(CommonQemuPaths(ctx.path, ctx.socket_path).pidfile)
+        pid = read_pid(CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path).pidfile)
         return bool(pid and is_pid_alive(pid) and is_qemu_process(pid))
 
 
-    def stop_container(self, izba, ctx, **opts):
+    def stop_container(self, izba: "Izba", ctr_ctx: "ContainerContext", **opts: Any) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
         from thirdparty.izba.subprocess import kill_pid, read_pid
 
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
-        if self.container_is_running(izba, ctx):
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
+        if self.container_is_running(izba, ctr_ctx):
             # TODO: We can be more graceful via SSH and qmp.
             # Blocks until qemu exits: SIGTERM, then SIGKILL if it takes over 30s.
             log.info("Blocking until stop complete.")
             kill_pid(read_pid(cqpath.pidfile), grace=30.0)
-            log.info(f"Container {ctx.id.hex} stopped.")
+            log.info(f"Container {ctr_ctx.id.hex} stopped.")
         else:
-            log.info(f"Container {ctx.id.hex} is not running")
+            log.info(f"Container {ctr_ctx.id.hex} is not running")
         return True
 
 
-    def exec_container(self, izba, ctx, user='user', command=None, stdin=None, artifact_name=None, **opts):
+    def exec_container(self, izba: "Izba", ctr_ctx: "ContainerContext", user: str = 'user',
+                       command: Optional[Sequence[str]] = None, stdin: Any = None,
+                       artifact_name: Optional[str] = None, **opts: Any) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
-        if not self.container_is_running(izba, ctx):
-            raise FileNotFoundError(f"Container {ctx.id.hex} is not running")
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
+        if not self.container_is_running(izba, ctr_ctx):
+            raise FileNotFoundError(f"Container {ctr_ctx.id.hex} is not running")
 
         if command and artifact_name:
             (cqpath.artifacts / f"exec-{artifact_name}.sh").write_text(' '.join(command))
         from thirdparty.izba.subprocess.ssh import ssh_run
         # stdin=None: ssh inherits ours (interactive or piped).
         proc = ssh_run(' '.join(command) if command else None, stdin=stdin,
-                       **self._ssh_conn(ctx, cqpath, user=user))
+                       **self._ssh_conn(ctr_ctx, cqpath, user=user))
         return proc.returncode == 0
 
 
-    def container_ready_wait(self, izba, ctx, **opts):
+    def container_ready_wait(self, izba: "Izba", ctr_ctx: "ContainerContext", **opts: Any) -> bool:
         from thirdparty.izba.subprocess.ssh import ssh_wait
-        cqpath = CommonQemuPaths(ctx.path, ctx.socket_path)
+        cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
         # Implicitly waits for 5 minutes.
-        ssh_wait("true", ok_returncodes=(0,), pidfile=cqpath.pidfile, **self._ssh_conn(ctx, cqpath))
+        ssh_wait("true", ok_returncodes=(0,), pidfile=cqpath.pidfile, **self._ssh_conn(ctr_ctx, cqpath))
         return True
 
 
-    def _build_base_cloud_config(self, izba, ctx, ssh_pubkey, reboot : bool = True):
+    def _build_base_cloud_config(self, izba: "Izba", ctr_ctx: "ContainerContext", ssh_pubkey: Optional[str],
+                                 reboot: bool = True) -> "cc.CloudConfig":
         import shlex
         import thirdparty.qemu.cloud_init.cloud_config as cc
 

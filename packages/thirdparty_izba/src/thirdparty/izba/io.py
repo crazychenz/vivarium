@@ -4,6 +4,15 @@ import sys
 import logging
 log = logging.getLogger(__name__)
 
+import hashlib
+
+def file_sha256(path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fobj:
+        while chunk := fobj.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
+
 
 SIZE_8_GIB = 8 << 30
 def make_file_sparse(path: Path="out.raw", size: int=SIZE_8_GIB):

@@ -58,8 +58,7 @@ def init_argparse():
     izba_import_parser = izba_subparsers.add_parser("import")
     izba_import_parser.add_argument("--driver", default='microvm')
     izba_import_parser.add_argument("-t", "--tag", dest='tags', action="append", default=[])
-    izba_import_parser.add_argument("--platform", default=None, help="default: driver's (linux)")
-    izba_import_parser.add_argument("--arch", default=None, help="default: driver's (x64)")
+    izba_import_parser.add_argument("--platform-arch", default=None, help="downloads key (default: linux-x64)")
     izba_import_parser.add_argument("--size", default=None, help="root disk size, e.g. 20G")
     izba_import_parser.add_argument("distro")
     izba_import_parser.set_defaults(func=izba_import_func)
@@ -182,9 +181,8 @@ def izba_images_func(args, config):
 
 def izba_import_func(args, config):
     source = {"import": args.distro}
-    for key in ("platform", "arch"):
-        if getattr(args, key) is not None:
-            source[key] = getattr(args, key)
+    if args.platform_arch:
+        source["platform_arch"] = args.platform_arch
     opts = {"size": args.size} if args.size else {}
     Izba(config).import_(source, driver=args.driver, tags=args.tags, **opts)
 
@@ -220,8 +218,8 @@ def izba_run_func(args, config):
 
 
 def izba_create_func(args, config):
-    ctx = Izba(config).create(args.layer, name=args.name, driver=args.driver)
-    print(ctx.id.hex)
+    ctr_ctx = Izba(config).create(args.layer, name=args.name, driver=args.driver)
+    print(ctr_ctx.id.hex)
 
 
 def izba_rm_func(args, config):

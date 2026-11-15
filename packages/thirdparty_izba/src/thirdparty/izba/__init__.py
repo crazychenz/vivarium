@@ -110,8 +110,9 @@ class Izba():
                 continue
 
             try:
-                from thirdparty.izba.layer import CONTAINER_RECORD, _read_yaml
-                parent = _read_yaml(entry / CONTAINER_RECORD).get("parent")
+                import yaml
+                from thirdparty.izba.container import CONTAINER_RECORD
+                parent = (yaml.safe_load((entry / CONTAINER_RECORD).read_text()) or {}).get("parent")
                 if parent is None:
                     image = "<import>"
                 else:
@@ -208,38 +209,68 @@ class Izba():
         ), "container")
 
 
-    # *blobs are de-duplicated files that may be shared across layers/containers.
-    @property
-    def blobs(self):
-        from thirdparty.izba.layer import BlobStore
-        return BlobStore(self.layers_path / "blobs")
+    def cache_download(self, distro, platform_arch=None):
+        '''Download (once) config['downloads'][platform_arch][distro] into
+        downloads/by_sha256. KeyError if either key is unknown. Returns
+        (path, config entry); path is downloads/by_sha256/<sha256 of the file>.'''
+        from thirdparty.izba.config import DEFAULT_PLATFORM_ARCH
+        entry = self.config['downloads'][platform_arch or DEFAULT_PLATFORM_ARCH][distro]
+
+        from thirdparty.izba.uuid import uuid7
+        from thirdparty.izba.io import file_sha256
+        import os
+        import shutil
+
+        by_name = self.downloads_path / "by_name" / entry['cache']
+        if not by_name.exists():
+            partial = (self.downloads_path / "partial" / uuid7().hex).resolve()
+            partial.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                # Raises on any failure.
+                from thirdparty.izba.download import download_with_progress
+                download_with_progress(url=entry['upstream'], dest_path=partial)
+            except BaseException:
+                partial.unlink(missing_ok=True)
+                # download_with_progress implicitly uses .part
+                partial.with_name(partial.name + ".part").unlink(missing_ok=True)
+                raise
+
+            by_sha256 = self.downloads_path / "by_sha256" / file_sha256(partial)
+            by_sha256.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(partial, by_sha256)
+
+            by_name.parent.mkdir(parents=True, exist_ok=True)
+            by_name.unlink(missing_ok=True)
+            by_name.symlink_to(os.path.relpath(by_sha256, by_name.parent))
+
+        return by_name.resolve(), entry
 
 
     def layer(self, alias):
         from thirdparty.izba.layer import Layer
-        return Layer.load(self._resolve_layer_path(alias), self.blobs)
+        return Layer.load(self._resolve_layer_path(alias))
 
 
     def _container_from_path(self, container_path):
         '''(driver, ContainerContext) of an existing container folder.'''
-        from thirdparty.izba.layer import ContainerContext, CONTAINER_RECORD, _read_yaml
+        import yaml
+        from thirdparty.izba.container import ContainerContext, CONTAINER_RECORD
         from thirdparty.izba.driver import get_izba_driver_eps
 
         record_fpath = container_path / CONTAINER_RECORD
         if not record_fpath.exists():
             raise FileNotFoundError(f"{container_path} has no {CONTAINER_RECORD}; not a container?")
-        record = _read_yaml(record_fpath)
+        record = yaml.safe_load(record_fpath.read_text()) or {}
         parent = self.layer(stduuid.UUID(record["parent"]["id"]).hex) if record.get("parent") else None
         driver = get_izba_driver_eps().create(record["driver"])
-        ctx = ContainerContext(
+        ctr_ctx = ContainerContext(
             id=stduuid.UUID(record["id"]),
             path=container_path,
             socket_path=self.sockets_path / container_path.name,
             parent=parent,
-            blobs=self.blobs,
             record=record,
         )
-        return driver, ctx
+        return driver, ctr_ctx
 
 
     def _iter_layers(self):
@@ -250,19 +281,20 @@ class Izba():
         for entry in sorted(by_uuid7_path.iterdir()):
             if entry.is_dir() and not entry.name.startswith("."):
                 try:
-                    yield Layer.load(entry, self.blobs)
+                    yield Layer.load(entry)
                 except FileNotFoundError as e:
                     log.warning(str(e))
 
 
     def _iter_container_records(self):
-        from thirdparty.izba.layer import CONTAINER_RECORD, _read_yaml
+        import yaml
+        from thirdparty.izba.container import CONTAINER_RECORD
         by_uuid7_path = self.containers_path / "by_uuid7"
         if not by_uuid7_path.is_dir():
             return
         for entry in sorted(by_uuid7_path.iterdir()):
             if (entry / CONTAINER_RECORD).exists():
-                yield entry, _read_yaml(entry / CONTAINER_RECORD)
+                yield entry, yaml.safe_load((entry / CONTAINER_RECORD).read_text()) or {}
 
 
     @staticmethod
@@ -302,7 +334,7 @@ class Izba():
 
     def _new_container(self, driver, parent, name=None):
         from thirdparty.izba.uuid import uuid7
-        from thirdparty.izba.layer import ContainerContext, new_container_record
+        from thirdparty.izba.container import ContainerContext, new_container_record
         from thirdparty.izba.path import image_name_encode
 
         if parent is not None and parent.format != driver.layer_format:
@@ -312,19 +344,18 @@ class Izba():
         container_id = uuid7()
         container_path = self.containers_path / "by_uuid7" / container_id.hex
         container_path.mkdir(parents=True)
-        ctx = ContainerContext(
+        ctr_ctx = ContainerContext(
             id=container_id,
             path=container_path,
             socket_path=self.sockets_path / container_id.hex,
             parent=parent,
-            blobs=self.blobs,
             record=new_container_record(container_id, driver, parent),
         )
-        ctx.socket_path.mkdir(mode=0o700, parents=True, exist_ok=True)
-        ctx.save_record()
+        ctr_ctx.socket_path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        ctr_ctx.save_record()
         if name:
             self._link(self.containers_path / "by_name" / image_name_encode(name), container_path)
-        return ctx
+        return ctr_ctx
 
 
     def create(self, layer, name=None, driver=None, **opts):
@@ -335,14 +366,14 @@ class Izba():
 
         parent = self.layer(layer) if isinstance(layer, str) else layer
         driver_obj = get_izba_driver_eps().create(driver or parent.driver)
-        ctx = self._new_container(driver_obj, parent, name=name)
+        ctr_ctx = self._new_container(driver_obj, parent, name=name)
         try:
-            driver_obj.create_container(self, ctx, **opts)
+            driver_obj.create_container(self, ctr_ctx, **opts)
         except BaseException:
-            self._remove_container(ctx)
+            self._remove_container(ctr_ctx)
             raise
-        log.info(f"Created container {ctx.id.hex} from layer {parent.id.hex}")
-        return ctx
+        log.info(f"Created container {ctr_ctx.id.hex} from layer {parent.id.hex}")
+        return ctr_ctx
 
 
     def import_(self, source, driver="microvm", name=None, tags=(), **opts):
@@ -354,26 +385,27 @@ class Izba():
         if isinstance(source, str):
             source = {"import": source}
         driver_obj = get_izba_driver_eps().create(driver)
-        ctx = self._new_container(driver_obj, None, name=name)
+        ctr_ctx = self._new_container(driver_obj, None, name=name)
         try:
-            driver_obj.import_container(self, ctx, source, **opts)
+            driver_obj.import_container(self, ctr_ctx, source, **opts)
         except BaseException:
-            self._remove_container(ctx)
+            self._remove_container(ctr_ctx)
             raise
-        return self.commit(ctx.id.hex, tags=tags)
+        return self.commit(ctr_ctx.id.hex, tags=tags)
 
 
     def _find_import_layer(self, driver, source):
         '''Newest existing layer imported from an equivalent source, if any.
 
-        Sources are compared after driver.resolve_source() fills in defaults;
-        extra recorded keys (e.g. the download's sha256) are ignored.'''
-        resolved = driver.resolve_source(self, source)
+        Compares import (distro) and platform_arch; other recorded keys (e.g.
+        the download's sha256) are ignored.'''
+        from thirdparty.izba.config import DEFAULT_PLATFORM_ARCH
+        wanted = (source["import"], source.get("platform_arch") or DEFAULT_PLATFORM_ARCH)
         found = None
         for layer in self._iter_layers():
             src = layer.manifest.get("source") or {}
             if layer.parent_id is None and layer.format == driver.layer_format and \
-                    all(src.get(k) == v for k, v in resolved.items()):
+                    (src.get("import"), src.get("platform_arch")) == wanted:
                 found = layer  # uuid7 sorts by time; keep the newest
         return found
 
@@ -385,21 +417,22 @@ class Izba():
         import os
         import shutil
         from thirdparty.izba.layer import (build_manifest, write_manifest, manifest_sha256,
-                                           Layer, LAYER_MANIFEST, CONTAINER_RECORD)
+                                           Layer, LAYER_MANIFEST)
+        from thirdparty.izba.container import CONTAINER_RECORD
 
         self._check_forbidden_tags(tags)
         container_path = self._resolve_container_path(container)
-        driver, ctx = self._container_from_path(container_path)
-        if driver.container_is_running(self, ctx):
-            raise RuntimeError(f"Container {ctx.id.hex} is running; stop it before committing.")
+        driver, ctr_ctx = self._container_from_path(container_path)
+        if driver.container_is_running(self, ctr_ctx):
+            raise RuntimeError(f"Container {ctr_ctx.id.hex} is running; stop it before committing.")
 
-        layer_path = self.layers_path / "by_uuid7" / ctx.id.hex
+        layer_path = self.layers_path / "by_uuid7" / ctr_ctx.id.hex
         if layer_path.exists():
             raise FileExistsError(f"Layer path {layer_path} already exists.")
         layer_path.parent.mkdir(parents=True, exist_ok=True)
 
-        artifacts = driver.commit_container(self, ctx, layer_path, **opts)
-        manifest = build_manifest(driver, ctx, artifacts)
+        artifacts = driver.commit_container(self, ctr_ctx, layer_path, **opts)
+        manifest = build_manifest(driver, ctr_ctx, artifacts)
         write_manifest(container_path / LAYER_MANIFEST, manifest)
         (container_path / CONTAINER_RECORD).unlink()
 
@@ -409,7 +442,7 @@ class Izba():
         except OSError:
             # containers_path and layers_path on different filesystems.
             shutil.move(container_path, layer_path)
-        shutil.rmtree(ctx.socket_path, ignore_errors=True)
+        shutil.rmtree(ctr_ctx.socket_path, ignore_errors=True)
 
         sha256 = manifest_sha256(manifest)
         self._link(self.layers_path / "by_sha256" / sha256, layer_path)
@@ -417,9 +450,9 @@ class Izba():
         for tag in tags or ():
             # Like docker: a tag moves to the newest layer built with it.
             self._link(self.layers_path / "by_name" / image_name_encode(tag), layer_path, replace=True)
-        log.info(f"Committed layer {ctx.id.hex} sha256:{sha256}")
-        print(ctx.id.hex)
-        return Layer(layer_path, manifest, self.blobs)
+        log.info(f"Committed layer {ctr_ctx.id.hex} sha256:{sha256}")
+        print(ctr_ctx.id.hex)
+        return Layer(layer_path, manifest)
 
 
     # Build a layer from a build spec (Izbafile).
@@ -427,7 +460,7 @@ class Izba():
         '''
             spec is a dict or a path to a yaml file:
 
-                from: <layer alias>        # or: from: {import: ubuntu}
+                from: <layer alias>        # or: from: {import: ubuntu, platform_arch: linux-x64}
                 driver: crt                # optional, defaults to the parent's driver
                 tags: [name, ...]          # optional, merged with tags
                 boot:                      # optional, driver specific
@@ -471,83 +504,83 @@ class Izba():
             parent = self.layer(str(base))
 
         driver = get_izba_driver_eps().create(spec.get("driver") or parent.driver)
-        ctx = self._new_container(driver, parent)
+        ctr_ctx = self._new_container(driver, parent)
         try:
             # * create the folder
-            driver.create_container(self, ctx, **opts)
+            driver.create_container(self, ctr_ctx, **opts)
             # * run the initial VM
-            driver.provision_container(self, ctx, spec, **opts)
+            driver.provision_container(self, ctr_ctx, spec, **opts)
             # * after provision, VM should be stopped
-            if driver.container_is_running(self, ctx):
-                raise RuntimeError(f"Container {ctx.id.hex} still running after provision. Bug in driver?")
+            if driver.container_is_running(self, ctr_ctx):
+                raise RuntimeError(f"Container {ctr_ctx.id.hex} still running after provision. Bug in driver?")
         except BaseException:
-            if driver.container_is_running(self, ctx):
-                driver.stop_container(self, ctx)
+            if driver.container_is_running(self, ctr_ctx):
+                driver.stop_container(self, ctr_ctx)
             if keep_failed:
-                print(f"Build failed; left container {ctx.id.hex} for inspection "
-                      f"(izba logs {ctx.id.hex[:12]}; izba rm {ctx.id.hex[:12]}).")
+                print(f"Build failed; left container {ctr_ctx.id.hex} for inspection "
+                      f"(izba logs {ctr_ctx.id.hex[:12]}; izba rm {ctr_ctx.id.hex[:12]}).")
             else:
-                self._remove_container(ctx)
+                self._remove_container(ctr_ctx)
             raise
         # * convert built container to layer
-        return self.commit(ctx.id.hex, tags=tags, **opts)
+        return self.commit(ctr_ctx.id.hex, tags=tags, **opts)
 
 
     def start(self, container, exist_ok=False, **opts):
-        driver, ctx = self._container_from_path(self._resolve_container_path(container))
-        return driver.start_container(self, ctx, exist_ok=exist_ok, **opts)
+        driver, ctr_ctx = self._container_from_path(self._resolve_container_path(container))
+        return driver.start_container(self, ctr_ctx, exist_ok=exist_ok, **opts)
 
 
     def stop(self, container, **opts):
-        driver, ctx = self._container_from_path(self._resolve_container_path(container))
-        return driver.stop_container(self, ctx, **opts)
+        driver, ctr_ctx = self._container_from_path(self._resolve_container_path(container))
+        return driver.stop_container(self, ctr_ctx, **opts)
 
 
     def exec(self, container, user='user', command=None, stdin=None, **opts):
-        driver, ctx = self._container_from_path(self._resolve_container_path(container))
-        return driver.exec_container(self, ctx, user=user, command=command, stdin=stdin, **opts)
+        driver, ctr_ctx = self._container_from_path(self._resolve_container_path(container))
+        return driver.exec_container(self, ctr_ctx, user=user, command=command, stdin=stdin, **opts)
 
 
     def logs(self, container, **opts):
-        _, ctx = self._container_from_path(self._resolve_container_path(container))
+        _, ctr_ctx = self._container_from_path(self._resolve_container_path(container))
         # TODO: implement follow and allow different log objects (stdout vs console)
-        print((ctx.path / "logs" / "console.log").read_text(errors="replace"))
+        print((ctr_ctx.path / "logs" / "console.log").read_text(errors="replace"))
         return True
 
 
-    def _remove_container(self, ctx):
+    def _remove_container(self, ctr_ctx):
         import shutil
-        self._unlink_links_to(self.containers_path / "by_name", ctx.path)
-        shutil.rmtree(ctx.path, ignore_errors=True)
-        shutil.rmtree(ctx.socket_path, ignore_errors=True)
+        self._unlink_links_to(self.containers_path / "by_name", ctr_ctx.path)
+        shutil.rmtree(ctr_ctx.path, ignore_errors=True)
+        shutil.rmtree(ctr_ctx.socket_path, ignore_errors=True)
 
 
     def rm(self, container, force=False, **opts):
-        driver, ctx = self._container_from_path(self._resolve_container_path(container))
+        driver, ctr_ctx = self._container_from_path(self._resolve_container_path(container))
         # TODO: force can be used to stop container before removing, but should be safe.
         # TODO: unsafe can be used to remove the files while running or referenced
-        if driver.container_is_running(self, ctx):
+        if driver.container_is_running(self, ctr_ctx):
             if not force:
-                raise RuntimeError(f"Container {ctx.id.hex} is running; stop it first (or force).")
-            driver.stop_container(self, ctx)
-        self._remove_container(ctx)
-        log.info(f"Removed container {ctx.id.hex}")
+                raise RuntimeError(f"Container {ctr_ctx.id.hex} is running; stop it first (or force).")
+            driver.stop_container(self, ctr_ctx)
+        self._remove_container(ctr_ctx)
+        log.info(f"Removed container {ctr_ctx.id.hex}")
         return True
 
 
     def run(self, layer, name=None, user='user', command=None, stdin=None, **opts):
         '''create, start, exec, stop and rm in one go. Never builds.'''
-        ctx = self.create(layer, name=name, **opts)
-        driver, ctx = self._container_from_path(ctx.path)
+        ctr_ctx = self.create(layer, name=name, **opts)
+        driver, ctr_ctx = self._container_from_path(ctr_ctx.path)
         try:
-            driver.start_container(self, ctx, **opts)
-            driver.container_ready_wait(self, ctx)
+            driver.start_container(self, ctr_ctx, **opts)
+            driver.container_ready_wait(self, ctr_ctx)
             # TODO: If --rm or remove=True, the container should be stopped and removed.
-            return driver.exec_container(self, ctx, user=user, command=command, stdin=stdin, **opts)
+            return driver.exec_container(self, ctr_ctx, user=user, command=command, stdin=stdin, **opts)
         finally:
-            if driver.container_is_running(self, ctx):
-                driver.stop_container(self, ctx)
-            self._remove_container(ctx)
+            if driver.container_is_running(self, ctr_ctx):
+                driver.stop_container(self, ctr_ctx)
+            self._remove_container(ctr_ctx)
 
 
     # --- Layers ---
@@ -585,6 +618,5 @@ class Izba():
         self._unlink_links_to(self.layers_path / "by_name", layer_path)
         self._unlink_links_to(self.layers_path / "by_sha256", layer_path)
         shutil.rmtree(layer_path)
-        # TODO: Garbage collect blobs no manifest references.
         log.info(f"Removed layer {layer_id}")
         return True

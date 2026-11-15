@@ -11,7 +11,7 @@ class IzbaAbstractBaseDriver():
     Izba owns layers and containers (folders, records, manifests, naming,
     hashing, commit). A driver owns what is inside a container and how to run
     it. Every method receives the Izba instance and a ContainerContext
-    (thirdparty.izba.layer) describing the container being operated on.
+    (thirdparty.izba.container) describing the container being operated on.
 
     Class attributes a driver must define:
 
@@ -37,28 +37,21 @@ class IzbaAbstractBaseDriver():
 
     # --- Container lifecycle (layer -> container) ---
 
-    # Return `source` (from a build spec's `from:` or `izba import`) with all
-    # defaults filled in. Izba reuses an existing import whose recorded source
-    # matches this, so include everything that shapes the imported layer.
-    def resolve_source(self, izba, source) -> dict:
-        return dict(source)
-
-
-    # Populate a parentless container from an external source (e.g. a distro
-    # download). ctx.parent is None.
-    def import_container(self, izba, ctx, source, **opts):
+    # Populate a parentless container from an external source, e.g.
+    # {"import": "ubuntu", "platform_arch": "linux-x64"}. ctr_ctx.parent is None.
+    def import_container(self, izba, ctr_ctx, source, **opts):
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
 
 
-    # Populate a new container from ctx.parent (e.g. a root disk backed by the
+    # Populate a new container from ctr_ctx.parent (e.g. a root disk backed by the
     # parent's root disk, copies of instance-copy slots).
-    def create_container(self, izba, ctx, **opts):
+    def create_container(self, izba, ctr_ctx, **opts):
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
 
 
     # Customize a stopped container according to a build spec and leave it
     # stopped and ready to commit. Raise on failure.
-    def provision_container(self, izba, ctx, spec, **opts):
+    def provision_container(self, izba, ctr_ctx, spec, **opts):
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
 
 
@@ -66,29 +59,29 @@ class IzbaAbstractBaseDriver():
 
     # Prepare a stopped container to become a layer at layer_path (it is moved
     # there by Izba after this returns) and return its artifacts:
-    #   {slot: {"path": rel path in folder} | {"blob": ref} | {"value": data}}
-    # Slots left out are inherited from ctx.parent where their kind allows.
-    def commit_container(self, izba, ctx, layer_path, **opts) -> dict:
+    #   {slot: {"path": rel path in folder, "sha256": hex} | {"value": data}}
+    # Slots left out are inherited from ctr_ctx.parent where their kind allows.
+    def commit_container(self, izba, ctr_ctx, layer_path, **opts) -> dict:
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
 
 
     # --- Running containers ---
 
-    def start_container(self, izba, ctx, exist_ok=False, **opts):
+    def start_container(self, izba, ctr_ctx, exist_ok=False, **opts):
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
 
 
-    def stop_container(self, izba, ctx, **opts):
+    def stop_container(self, izba, ctr_ctx, **opts):
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
 
 
-    def container_is_running(self, izba, ctx) -> bool:
+    def container_is_running(self, izba, ctr_ctx) -> bool:
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
 
 
-    def container_ready_wait(self, izba, ctx, **opts):
+    def container_ready_wait(self, izba, ctr_ctx, **opts):
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
 
 
-    def exec_container(self, izba, ctx, user='user', command=None, stdin=None, **opts):
+    def exec_container(self, izba, ctr_ctx, user='user', command=None, stdin=None, **opts):
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")

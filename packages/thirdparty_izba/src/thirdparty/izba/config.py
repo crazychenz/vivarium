@@ -11,6 +11,8 @@ from pathlib import Path
 
 
 DEFAULT_WORST_CASE_IZBA_BASE_PATH = Path('.') / "izba"
+# Key into config['downloads'] when an import source omits platform_arch.
+DEFAULT_PLATFORM_ARCH = "linux-x64"
 
 
 def xdg_config_home() -> Path:
@@ -47,14 +49,14 @@ def baseline_empty_config():
                 "alpine": {
                     'cache': "alpine-3.24.2-x86_64-cloudinit-r2.qcow2",
                     'upstream': f"https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/cloud/alpine-3.24.2-x86_64-cloudinit-r2.qcow2",
-                    'bootfiles': ["/boot/vmlinuz-virt", "/boot/initramfs-virt"],
+                    'bootfiles': {"kernel": "/boot/vmlinuz-virt", "initrd": "/boot/initramfs-virt"},
                     # Root filesystem as named in the image's /etc/fstab.
                     'root': "LABEL=/",
                 },
                 "ubuntu": {
                     'cache': "noble-server-cloudimg-amd64.img",
                     'upstream': "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
-                    'bootfiles': ["/boot/vmlinuz", "/boot/initrd.img"],
+                    'bootfiles': {"kernel": "/boot/vmlinuz", "initrd": "/boot/initrd.img"},
                     # Root filesystem as named in the image's /etc/fstab.
                     'root': "LABEL=cloudimg-rootfs",
                 },

@@ -56,9 +56,9 @@ qemu_cmd.add_hostfwd(mgmt, host_port=2222, guest_port=22)
 class CommonQemuPaths():
     '''Well known files of a microvm container (and of the layer it becomes).
 
-    Inheritable artifacts (seed, identity) only exist here while the
-    container owns its own copy; otherwise they come from the parent layer
-    (or the blob store), see IzbaMicroVmDriver._artifact().'''
+    Inheritable files (seed, identity, kernel, initrd) only exist here when
+    this container/layer introduced them; otherwise they are read from the
+    ancestor layer that did, see IzbaMicroVmDriver._artifact().'''
 
     def __init__(self, container_path, socket_path):
         self.container_path = Path(container_path)
@@ -74,10 +74,13 @@ class CommonQemuPaths():
         self.root = self.images / "root.qcow2"
         self.state = self.images / "state.bin"
 
-        # inherit slots this container produces itself (moved to the blob store
-        # at commit). Kernel/initrd are never files here, see _commit_bootfiles.
+        # inherit slots this container produces itself (stay in the layer at
+        # commit and are referenced from there by descendants).
         self.seed = self.images / "seed.iso"
         self.identity = self.container_path / "misc" / "ssh" / "id_ed25519"
+        # boot/<slot> (kernel, initrd): written at commit only when they
+        # differ from the parent's, see _commit_bootfiles.
+        self.boot = self.container_path / "boot"
 
         # marks that this container's disk has diverged from the layer's RAM snapshot
         self.booted = self.container_path / "booted"
