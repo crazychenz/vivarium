@@ -1,32 +1,153 @@
 ## izba
 
-izba - to emerge from the eggshell or izbal case
+Corporate environments are not conducive to development work and therefore suffocate innovation and evolution. Good job suits. I say forget that ignorance. Lets build our own workshop in our own bubble. A space that gives some of the innovative development that corporate servants have been starved of. Notice: `izba` is a tool that on the surface (and maybe even within) has been done a dozen times before. Its yet another "I can manage qemu machines for you" kind of wrapper tool.
 
-Corporate environments are not conducive to development work and therefore suffocate innovation and evolution. Good job suits. I say forget that ignorance. Lets build our own shop in our own bubble. A space that gives some of the innovative development that corporate servants have been starved of. Notice: `izba` is a tool that on the surface (and maybe even within) has been done a dozen times before. Its yet another "I can manage qemu machines for you" kind of wrapper tool.
-
-`izba` aims to provide a memorable command line interface for running qemu profiles. The profiles are focused on common developer environments that are usually dorked in some way by corporate policies. The primary use cases are rootless podman and rooted docker environments. But wait ... podman is rootless?! Wrong!, podman "setup correctly" is rootless. You need root to setup cgroups, seccomp, `/etc/subuid`, and `/etc/subgid`. Often I find experts and LLMs spouting off the same non-sense of "and you can do it as a user." When ACTUALLY, "you can do it as a user _if the admin is your friend_", is the whole truth.
-
+`izba` aims to provide a memorable command line interface for running qemu profiles. The profiles are focused on common developer environments that are usually dorked in some way by corporate policies. 
 
 `izba` aims to work around most issues, but there are some absolute dependencies. You need to be able to:
 
-- Run qemu-system-$ARCH. You don't need `/dev/kvm`, but you'll want it for anything significant.
+- Run qemu-system-$ARCH.
 - Run various executables that listen on high ports. You can often get away with localhost only if required.
-- Point at local mirrors if the internet is not available. Complete offline is not a priority of `izba`.
+- Point at local mirrors if the internet is not available.
 
 `izba` aims to mimic container CLI to keep things more memorable.
+
+## Docker vs Izba
+
+Docker manages linux namespaces. Izba manages virtual machines and other environments with user permissions (primarily focused on VM capability though).
+
+Roughly, Docker has:
+
+- file system layers given a sha256 hash (possibly based on content)
+- layers tagged as images
+- containers configured with resources, a writable layer, and a backing image (or chain of layers)
+- runtime (running container) that has been started and has runtime state
+- checkpoint - saved runtime state
+
+Izba has:
+
+- file system layers (often as qcow2 image) given a UUID7 id.
+- tagged layers (qcow2) as images
+- containers (i.e. qemu) configured with resources, a writable layer (qcow2 overlay), and a backing image (qcow2)
+- runtime (running qemu) with runtime state
+- checkpoint - saved runtime state (as a qmp migration)
+
+## Izba CLI Synopsis
 
 ```text
 izba \
   [--izba-path <path>] \           # Defaults to ~/.local/state/izba OR VENV_PATH/izba
-  [--profiles-path <path>] \       # PUPA_PATH/profiles
+  [--config <path>] \
   <subcommand> [sub-command opts]
+```
 
-Note: <vm> is not the name of a folder. its the entrypoint to an object that defines the "VM Profile"
-Note: name defaults to 'default'
+### Common Commands
 
-izba version                       # display version of izba
-izba ps [opts] [-a]                # print running izba vm profile states, -a for all profile states
-izba images [opts] [-a]            # print built golden images, -a for all profile images
+- `izba run` - Create and run a single command from an izba image.
+- `izba exec` - Execute a command in a running izba
+- `izba ps [-a]` - print running izbas, -a to include all created izbas (running or not)
+- `izba build` - build an izba
+- `izba images [-a]` - print tagged images, -a to include all layers
+- `izba version` - print izba version
+
+### Commands
+
+- `izba attach` - attach stdio to container
+- `izba commit` - create new read-only image from container
+- `izba cp` - copy files from/to container
+- `izba create` - create container
+- `izba inspect` - return information on objects
+- `izba kill` - kill container
+<!-- - `izba load` - load image from tar -->
+- `izba logs` - fetch logs of container
+- `izba pause` - pause izba container
+- `izba rename` - rename izba container
+- `izba restart` - start izba container
+- `izba rm` - remove izba container
+- `izba rmi` - remove izba image
+- `izba save` - save izba image to tar
+- `izba start` - start stopped container
+- `izba stop` - stop running container
+- `izba tag` - retag an izba image/layer
+- `izba top` - display running processes in container
+- `izba unpause` - unpause container
+- `izba wait` - block until container stops
+
+## Izba API Synopsis
+
+- `izba = Izba(**opts)` - Constructor
+- `izba.build(**opts)` - build izba image
+- `izba.commit(**opts)` - create new image from container
+- `izba.create(**opts)` - create izba container from image
+- `izba.exec(**opts)` - exec command in izba container
+- `izba.images(**opts): [str]` - get array of built images
+- `izba.inspect(**opts): {}` - get object information
+- `izba.kill(container, **opts)` - kill container
+- `izba.logs(container, **opts)` - fetch container logs
+- `izba.pause(container, **opts)` - pause container
+- `izba.ps(**opts): [str]` - get array of running containers
+- `izba.rename(src, dst, **opts)` - rename container
+- `izba.restart(container, **opts)` - restart container
+- `izba.rm(container, **opts)` - remove container
+- `izba.rmi(image, **opts)` - remove image tag
+- `izba.run(**opts)` - create, start, exec command in container (optionally stop and rm)
+- `izba.start(**opts)` - start created and stopped izba container
+- `izba.stop(**opts)` - stop running izba container
+- `izba.tag(src, dst, **opts)` - retag izba image/layer
+- `izba.top(container, **opts)` - see running processes in container
+- `izba.unpause(container, **opts)` - unpause container
+- `izba.version(): [major,minor,micro,rev]` - get version array
+- `izba.wait(container, **opts)` - block until container stops
+
+## Izba Utilities
+
+- `thirdparty.izba.subprocess` - Process handing utilities
+  - `stdin_if_noninteractive()` - Return sys.stdin if sys.stdin is FIFO.
+
+
+`thirdparty.izba.subprocess.ssh` - SSH CLI handling utilities
+
+## Izba Folders
+
+- IZBA_BASE_PATH - The base path of IZBA default file structure
+- IZBA_CACHE_PATH - long lived things for reuse (defaults to IZBA_BASE_PATH / "cache")
+- IZBA_DOWNLOAD_PATH - URL downloads (defaults to IZBA_CACHE_PATH / "downloads")
+  - IZBA_DOWNLOAD_PATH / "by_md5" - Download content stored as md5. Names are only symlinks.
+  - IZBA_DOWNLOAD_PATH / "by_name" - Symlinks (by name) to downloaded content.
+  - IZBA_DOWNLOAD_PATH / "partial" - Currently downloading files.
+- IZBA_LAYERS_PATH
+  - IZBA_LAYERS_PATH / "by_uuid7" - the real location
+  - IZBA_LAYERS_PATH / "by_sha256" - symlink to uuid7
+  - IZBA_LAYERS_PATH / "by_tag" - symlink to uuid7
+
+- construction - in-motion, no-touchy! (defaults to IZBA_BASE_PATH / "construction")
+  - IZBA_BASE_PATH / "construction" / "by_uuid7" - building images by time based uuid
+
+- IZBA_CONTAINERS_PATH - izba containers path (defaults to IZBA_BASE_PATH / "containers")
+  - IZBA_CONTAINERS_PATH / "by_uuid7" - real container storage and by time based uuid
+  - IZBA_CONTAINERS_PATH / "by_name" - containers by name, symlinked to by_uuid7
+
+- IZBA_SOCKET_BASE_PATH - The (short!) base path for Izba sockets. (Usually defaults to usually /run or /tmp based path)
+
+- MICROVM_IMAGE_PATH - The path of a single (microvm driven) image.
+  - MICROVM_IMAGE_PATH / "artifacts" - Bread crumbs for troubleshooting
+  - MICROVM_IMAGE_PATH / "context" - Files to be included in the seed/cidata data source.
+  - MICROVM_IMAGE_PATH / "images" - Disk images, state captures
+  - MICROVM_IMAGE_PATH / "logs" - Log data
+  - MICROVM_IMAGE_PATH / "misc" - Data tightly associated with image (e.g. SSH keys)
+  - MICROVM_IMAGE_PATH / "mnt" - Default location exposed to VM for file-level host access
+  - MICROVM_IMAGE_PATH / "driver" - File containing driver used to manage image.
+
+- MICROVM_CONTAINER_PATH - The path of a single (microvm driven) container.
+  - MICROVM_CONTAINER_PATH / "artifacts" - Bread crumbs for troubleshooting
+  - MICROVM_CONTAINER_PATH / "base" - Symlink to the image container is backed by
+  - MICROVM_CONTAINER_PATH / "images" - Disk image layer, state captures
+  - MICROVM_CONTAINER_PATH / "logs" - Log data
+  - MICROVM_CONTAINER_PATH / "mnt" - Default location exposed to VM for file-level host access
+
+
+
+
 izba inspect [opts] <vm> [<name>]  # dump json about vm profile
 izba build [opts] <vm> [<name>]    # provision the golden image
   [--network=<internet-only|slirp|none>]

@@ -54,39 +54,49 @@ qemu_cmd.add_hostfwd(mgmt, host_port=2222, guest_port=22)
 '''
 
 class CommonQemuPaths():
-    def __init__(self, izba):
+    '''Well known files of a microvm container (and of the layer it becomes).
 
-        self.vm_path = izba.image_path
-        if hasattr(izba, 'overlay_path'):
-            self.vm_path = izba.overlay_path
-        elif hasattr(izba, 'build_path'):
-            self.vm_path = izba.build_path
+    Inheritable artifacts (seed, identity) only exist here while the
+    container owns its own copy; otherwise they come from the parent layer
+    (or the blob store), see IzbaMicroVmDriver._artifact().'''
 
-        self.logs = self.vm_path / "logs"
-        self.images = self.vm_path / "images"
-        self.artifacts = self.vm_path / "artifacts"
-        self.overlay = self.vm_path / "images" / "overlay.qcow2"
+    def __init__(self, container_path, socket_path):
+        self.container_path = Path(container_path)
+        self.socket_path = Path(socket_path)
 
-        self.pidfile = izba.run_path / "qemu.pid"
-        self.qmp = izba.run_path / "qemu.qmp"
-        self.ssh_host_port = izba.run_path / "ssh_host_port"
+        self.logs = self.container_path / "logs"
+        self.images = self.container_path / "images"
+        self.artifacts = self.container_path / "artifacts"
+        self.context = self.container_path / "context"
+        self.mnt = self.container_path / "mnt"
+
+        # chain / local slots (paths inside the layer)
+        self.root = self.images / "root.qcow2"
+        self.state = self.images / "state.bin"
+
+        # inherit slots this container produces itself (moved to the blob store
+        # at commit). Kernel/initrd are never files here, see _commit_bootfiles.
+        self.seed = self.images / "seed.iso"
+        self.identity = self.container_path / "misc" / "ssh" / "id_ed25519"
+
+        # marks that this container's disk has diverged from the layer's RAM snapshot
+        self.booted = self.container_path / "booted"
 
         self.console = self.logs / "console.log"
         self.stderr_log = self.logs / "qemu-stderr.log"
-        self.debug_log = self.logs / "qemu-debug.log"
 
-        # These come from base image.
-        image_path = izba.image_path
-        if hasattr(izba, 'build_path'):
-            image_path = izba.build_path
+        self.pidfile = self.socket_path / "qemu.pid"
+        self.qmp = self.socket_path / "qemu.qmp"
+        self.ssh_host_port = self.socket_path / "ssh_host_port"
+        self.tun_qemu = self.socket_path / "tun_qemu.sock"
+        self.tun_bridge = self.socket_path / "tun_bridge.sock"
 
-        self.kernel = image_path / "images" / "vmlinuz"
-        self.initrd = image_path / "images" / "initrd.img"
-        self.base_image = image_path / "images" / "base-image.qcow2"
-        self.origin = image_path / "images" / "origin-overlay.qcow2"
-        self.seed = image_path / "images" / "seed.iso"
-        self.state = image_path / "images" / "origin-overlay.state"
-        self.identity = image_path / "misc" / "ssh" / "id_ed25519"
+    def make_dirs(self):
+        for folder in (self.logs / "console", self.images, self.artifacts,
+                       self.context, self.mnt, self.identity.parent):
+            folder.mkdir(parents=True, exist_ok=True)
+        self.socket_path.mkdir(mode=0o700, parents=True, exist_ok=True)
+
 
 
 class QemuMicroVmCommand():
@@ -339,56 +349,3 @@ class QemuMicroVmCommand():
     def to_args(self):
         return self._obj.to_args()
 
-    # def ORIGNAL(self):
-    #     import thirdparty.qemu.qapi as qapi
-    #     self._obj = qapi.QemuCommand(
-    #         # --- common ---
-    #         machine=qapi.MicroVM(acpi=False),
-    #         no_reboot=True,
-    #         enable_kvm=True,
-    #         cpu="host",
-    #         memory="2G",
-    #         smp=2,
-    #         kernel=kernel_fpath,
-    #         initrd=initrd_fpath,
-    #         append=kernel_cmdline,
-    #         nodefaults=True,
-    #         no_user_config=True,
-    #         display="none",
-    #         serial=[qapi.ChardevFile(path=log_fpath)],
-    #         # Relative: an absolute path can exceed the AF_UNIX path limit (~108 bytes).
-    #         qmp=[qapi.ChardevSocket(path=qmp_fpath.relative_to(izba.overlay_path), server=True, wait=False)],
-    #         pidfile=pidfile_fpath,
-    #         daemonize=True,
-    #         sandbox=True,
-    #         # --- use case specific ---
-    #         # Absolute: -daemonize makes QEMU chdir("/"), and inactivating the overlay for
-    #         # a state save reopens it read-only *by filename*. With a relative path that
-    #         # reopen fails, write permission is kept, and the migration fails with
-    #         # "Error in migration completion: Bad address".
-    #         drives=[
-    #             qapi.Drive(id="root", file=overlay_image_fpath, format="qcow2", interface="none"),
-    #             qapi.Drive(id="seed", file=seed_fpath, format="raw", interface="none", readonly=True),
-    #         ],
-    #         netdevs=[
-    #             # qapi.NetdevDgram(
-    #             #     id="tunnel",
-    #             #     local=qapi.UnixSocketAddress(path=tunnel_qemu_side_fpath.relative_to(izba.overlay_path)),
-    #             #     remote=qapi.UnixSocketAddress(path=tunnel_bridge_side_fpath.relative_to(izba.overlay_path)),
-    #             # ),
-    #             qapi.NetdevUser(
-    #                 id="mgmt",
-    #                 #restrict=True,
-    #                 hostfwd=[qapi.HostFwd(host_addr="127.0.0.1", host_port=ssh_host_port, guest_port=22)],
-    #             ),
-    #         ],
-    #         devices=[
-    #             qapi.VirtioBlk(drive="root"),
-    #             qapi.VirtioBlk(drive="seed"),
-    #             # qapi.VirtioNet(netdev="tunnel", mac="52:54:00:aa:00:01"),
-    #             qapi.VirtioNet(netdev="mgmt"),
-    #             qapi.VirtioRng(),
-    #         ],
-    #         incoming=f"file:{state_fpath}",
-    #         msg_timestamp=True,
-    #     )

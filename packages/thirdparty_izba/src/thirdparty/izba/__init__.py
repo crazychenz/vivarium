@@ -7,580 +7,584 @@ log = logging.getLogger(__name__)
 def version():
     return [0, 0, 0, 0]
 
-
-
 # FileExistsError - Izba related resource already running. Usually pass-able.
 # FileNotFoundError - Izba related resource missing. Usually raise-able.
 
 
-class Izba():
-    def __init__(self, config):
-        
-        import thirdparty.izba.config as cfg
+import re
+# Not `uuid`: importing the thirdparty.izba.uuid submodule rebinds that name here.
+import uuid as stduuid
 
+_SHA256_RE = re.compile(r"[0-9a-fA-F]{64}")
+_UUID7_HEX_RE = re.compile(r"[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}", re.IGNORECASE)
+
+def is_sha256(s: str) -> bool:
+    return _SHA256_RE.fullmatch(s) is not None
+
+def is_uuid7_hex(s: str) -> bool:
+    """32 hex chars, no dashes."""
+    return _UUID7_HEX_RE.fullmatch(s) is not None
+
+
+class Izba():
+    def __init__(self, config=None):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+
+        import thirdparty.izba.config as cfg
         self.config = config
         self.base_path = cfg.resolve_base_path(config)
         self.cache_path = cfg.resolve_cache_path(config)
-        self.downloads_path = self.cache_path / "downloads"
-        self.construction_path = cfg.resolve_construction_path(config)
-        self.images_path = cfg.resolve_images_path(config)
-        self.overlays_path = cfg.resolve_overlays_path(config)
-        self.run_base_path = cfg.resolve_socket_base_path(config)
+        self.downloads_path = cfg.resolve_downloads_path(config)
+        self.containers_path = cfg.resolve_containers_path(config)
+        self.layers_path = cfg.resolve_layers_path(config)
+        self.sockets_path = cfg.resolve_socket_base_path(config)
 
-        self.driver = None
-        self._with_driver = False
-        self._with_image = False
-        self._with_overlay = False
+    # TODO: We don't get "driver" until we call build.
 
+    # TODO: All non-container, non-layer methods here.
 
-    def with_driver(self, driver: str): #, image_id: uuid.UUID=None): #, overlay: str, def_overlay_name='default'):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+    # --- Listing helpers ---
 
-        if self._with_overlay is True:
-            raise RuntimeError("Use with_driver() before with_overlay().")
+    _ID_PREFIX_LEN = 12
 
-        from thirdparty.izba.driver import get_izba_driver_eps
-        driver_index = get_izba_driver_eps()
+    @staticmethod
+    def _print_table(headers, rows):
+        widths = [len(h) for h in headers]
+        for row in rows:
+            widths = [max(w, len(c)) for w, c in zip(widths, row)]
+        for row in [headers, *rows]:
+            print("   ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip())
 
-        self.driver_name = driver
-        self.driver = driver_index.create(self.driver_name)
+    @staticmethod
+    def _reverse_links(ns_path, by_uuid7_path):
+        """Map uuid7 hex -> sorted list of link names in ns_path that resolve
+        into by_uuid7_path. Dangling or foreign links are skipped."""
+        result = {}
+        if not ns_path.is_dir():
+            return result
+        for entry in sorted(ns_path.iterdir()):
+            if not entry.is_symlink():
+                continue
+            target = entry.resolve()
+            if target.parent != by_uuid7_path or not target.is_dir():
+                log.warning(f"Ignoring dangling or foreign link: {entry} -> {target}")
+                continue
+            result.setdefault(target.name, []).append(entry.name)
+        return result
 
-        self._with_driver = True
+    def _layer_index(self):
+        """Return (uuid7 hex list, {uuid7: [names]}, {uuid7: [sha256s]})."""
+        from thirdparty.izba.path import image_name_decode
+        by_uuid7_path = (self.layers_path / "by_uuid7").resolve()
+        uuids = sorted(e.name for e in by_uuid7_path.iterdir() if e.is_dir()) \
+            if by_uuid7_path.is_dir() else []
+        names = {k: [image_name_decode(n) for n in v] for k, v in
+                 self._reverse_links(self.layers_path / "by_name", by_uuid7_path).items()}
+        shas = self._reverse_links(self.layers_path / "by_sha256", by_uuid7_path)
+        return uuids, names, shas
 
-        return self
-
-
-    def _resolve_image_alias(self, image: str):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        imageid = None
-        image_path = None
-        image_name = None
-
-        by_id_path = self.images_path / "by_id"
-        by_name_path = self.images_path / "by_name"
-
-        import uuid
-        from thirdparty.izba.path import image_name_decode, image_name_encode
-        encoded_alias = image_name_encode(image)
-
-        for entry in by_name_path.iterdir():
-            if entry.is_dir() and entry.name.startswith(encoded_alias):
-                if imageid is not None:
-                    # Ambiguous name
-                    raise ValueError("Ambiguous image alias, please be more specific.")
-
-                # TODO: Consider checking if link exists.
-                imageid = uuid.UUID(entry.resolve().name)
-                image_path = by_id_path / imageid.hex
-                image_name = image_name_decode(entry.name)
-
-        for entry in by_id_path.iterdir():
-            if entry.is_dir() and entry.name.startswith(encoded_alias):
-                if imageid is not None:
-                    # Ambiguous name
-                    raise ValueError("Ambiguous image alias, please be more specific.")
-
-                imageid = uuid.UUID(entry.resolve().name)
-                image_path = by_id_path / imageid.hex
-        
-        return imageid, image_path, image_name
-
-
-    def with_image(self, image: str):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        self.imageid, self.image_path, self.image_name = self._resolve_image_alias(image)
-        
-        if self.imageid is None:
-            raise FileNotFoundError("No matching image found.")
-
-        from thirdparty.izba.driver import get_izba_driver_eps
-        driver_index = get_izba_driver_eps()
-        self.driver_name = (self.image_path / "driver").read_text().strip()
-        self.driver = driver_index.create(self.driver_name)
-
-        self.run_path = self.run_base_path / str(self.imageid.hex)
-        self.run_path.mkdir(mode=0o700, parents=True, exist_ok=True)
-
-        self._with_image = True
-
-        return self
-
-
-    def with_overlay(self, overlay: str):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-        self.overlay_name = overlay
-        self.overlay_path = self.overlays_path / self.overlay_name
-        if not self.overlay_path.exists():
-            raise FileNotFoundError(f"Overlay {overlay} does not exist. Run create or run first.")
-
-        if self.driver is None:
-            # We want to infer driver from "driver" file.
-            from thirdparty.izba.driver import get_izba_driver_eps
-            driver_index = get_izba_driver_eps()
-
-            driver_fpath = self.overlays_path / overlay / "driver"
-            if not driver_fpath.exists():
-                print(f"Overlay {overlay} has no driver specified (does it exist?). Run create or run first.")
-                return None
-            self.driver_name = driver_fpath.read_text().strip()
-            if self.driver_name not in driver_index._index:
-                print(f"Driver type {self.driver_name} not registered as 'thirdparty_izba_drivers' entrypoint.")
-                return None
-            self.driver = driver_index.create(self.driver_name)
-
-        import uuid
-        self.image_path = (self.overlay_path / "base").resolve()
-        self.imageid = uuid.UUID(self.image_path.name)
-
-        # TODO: Verify overlay name is directory safe?
-        self.run_path = self.run_base_path / f"{self.imageid.hex}-{self.overlay_name}"
-        self.run_path.mkdir(mode=0o700, parents=True, exist_ok=True)
-        
-        self._with_overlay = True
-
-        return self
-
-
-    # def _create_std_folders(self):
-
-    #     # Create standard folders for base image path
-    #     # TODO: Verify profiles/profile_name/profile_inst doesn't already exist.
-    #     for folder in ['context', 'misc', 'artifacts', 'images', 'logs', 'run', 'mnt', 'overlays']:
-    #         (self.inst_path / folder).mkdir(parents=True, exist_ok=True)
-    #     (self.inst_path / "logs" / "console").mkdir(parents=True, exist_ok=True)
-
-    #     # Create standard folders for overlay image path
-    #     # TODO: Verify overlays/overlay_name doesn't already exist.
-    #     for folder in ['images', 'logs', 'run', 'mnt']:
-    #         (self.overlay_path / folder).mkdir(parents=True, exist_ok=True)
-    #     (self.overlay_path / "logs" / "console").mkdir(parents=True, exist_ok=True)
-    #     #* If we're creating the overlay here, might as well create the profile reference too. *#
-    #     (self.overlay_path / "profile").write_text(f"{self.profile_name}/{self.profile_inst}")
-
+    def _container_is_running(self, uuid7_hex):
+        from thirdparty.izba.subprocess import is_pid_alive, read_pid
+        from thirdparty.izba.subprocess.qemu import is_qemu_process
+        pid = read_pid(self.sockets_path / uuid7_hex / "qemu.pid")
+        return bool(pid and is_pid_alive(pid) and is_qemu_process(pid))
 
     # List running VMs, [-a] list all instance VMs
     def ps(self, all=False, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        # TODO: Replace following with list of _running_ overlays.
+        from thirdparty.izba.path import image_name_decode
 
-        from thirdparty.izba.driver import get_izba_driver_eps
-        driver_index = get_izba_driver_eps()
+        n = self._ID_PREFIX_LEN
+        by_uuid7_path = (self.containers_path / "by_uuid7").resolve()
+        _, layer_names, _ = self._layer_index()
+        container_names = self._reverse_links(self.containers_path / "by_name", by_uuid7_path)
 
-        for entry in self.overlays_path.iterdir():
-            if entry.is_dir():
-                if all:
-                    print(entry.name)
+        rows = []
+        entries = sorted(by_uuid7_path.iterdir()) if by_uuid7_path.is_dir() else []
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            running = self._container_is_running(entry.name)
+            if not running and not all:
+                continue
+
+            try:
+                from thirdparty.izba.layer import CONTAINER_RECORD, _read_yaml
+                parent = _read_yaml(entry / CONTAINER_RECORD).get("parent")
+                if parent is None:
+                    image = "<import>"
                 else:
-                    driver_name = (entry / "driver").read_text().strip()
-                    driver = driver_index.create(driver_name)
-                    if driver.izba_is_running(self, entry):
-                        print(entry.name)
+                    layer_hex = stduuid.UUID(parent["id"]).hex
+                    names = layer_names.get(layer_hex, [])
+                    image = names[0] if len(names) == 1 else layer_hex[:n]
+            except (FileNotFoundError, ValueError, KeyError):
+                image = "<missing>"
 
-        # from thirdparty.izba.subprocess.qemu import scan_qemu_pidfiles
-        # summary = scan_qemu_pidfiles(self.profiles_inst_path, "instance.pid")
+            name = ",".join(image_name_decode(x) for x in container_names.get(entry.name, []))
+            row = [entry.name[:n], image, name]
+            if all:
+                row.insert(2, "running" if running else "stopped")
+            rows.append(row)
 
-        # print(f"{"Profile":15} {"Name":15} {"Pidfile":7} {"PID":10} {"Running":6}")
-        # print(f"{"-"*15:15} {"-"*15:15} {"-"*7:7} {"-"*10:10} {"-"*7:7}")
-        # for key_path, value in summary.items():
-        #     has_pidfile = 'True' if value['has_pidfile'] else 'False'
-        #     pid = f'{value['pid']}' if has_pidfile else ''
-        #     running = 'True' if value['running'] else 'False'
-        #     if not all and not value['running']:
-        #         continue
-        #     print(f"{value['type_name']:15} {key_path.name:15} {has_pidfile:7} {pid:10} {running:7}")
+        headers = ["CONTAINER ID", "IMAGE", "NAMES"]
+        if all:
+            headers.insert(2, "STATUS")
+        self._print_table(headers, rows)
+        return True
 
-
-    # List profiles and names with golden images.
+    # List named layers, [-a] also untagged layers.
     def images(self, all=False, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
-        # TODO: Replace following with list of _named_ images.
+        n = self._ID_PREFIX_LEN
+        uuids, names, shas = self._layer_index()
 
-        for entry in (self.images_path / "by_name").iterdir():
-            if entry.is_dir():
-                print(entry.name)
-        
-        if all:
-            for entry in (self.images_path / "by_id").iterdir():
-                if entry.is_dir():
-                    print(entry.name)
+        rows = []
+        for layer_hex in uuids:
+            sha = ",".join(s[:n] for s in shas.get(layer_hex, [])) or "<none>"
+            layer_names = names.get(layer_hex, [])
+            if not layer_names and all:
+                layer_names = ["<none>"]
+            for name in layer_names:
+                rows.append([name, layer_hex[:n], sha])
 
-        # from thirdparty.izba.subprocess.qemu import scan_qemu_pidfiles
-        # summary = scan_qemu_pidfiles(self.profiles_gold_path, "golden.pid")
+        rows.sort(key=lambda r: (r[0] == "<none>", r[0], r[1]))
+        self._print_table(["NAME", "ID", "SHA256"], rows)
+        return True
 
-        # print(f"{"Profile":15} {"Name":15} {"Pidfile":7} {"PID":10} {"Running":6}")
-        # print(f"{"-"*15:15} {"-"*15:15} {"-"*7:7} {"-"*10:10} {"-"*7:7}")
-        # for key_path, value in summary.items():
-        #     has_pidfile = 'True' if value['has_pidfile'] else 'False'
-        #     pid = f'{value['pid']}' if has_pidfile else ''
-        #     running = 'True' if value['running'] else 'False'
-        #     print(f"{value['type_name']:15} {key_path.name:15} {has_pidfile:7} {pid:10} {running:7}")
+    
+    # --- Resolution ---
+
+    def _resolve_alias(self, alias, base_path, namespaces, kind):
+        '''Resolve an id/name (or a unique prefix of one) to its folder in
+        base_path / "by_uuid7". namespaces: [(subdir, encoded alias)].
+
+        An exact match in any namespace wins over prefix matches. Raises
+        FileNotFoundError if nothing matches and ValueError if the prefix
+        matches more than one distinct target.'''
+        if not alias:
+            raise ValueError(f"Empty {kind} alias.")
+
+        by_uuid7_path = (base_path / "by_uuid7").resolve()
+        exact = set()
+        prefixed = set()
+        for subdir, encoded in namespaces:
+            ns_path = base_path / subdir
+            if not ns_path.is_dir():
+                continue
+            for entry in ns_path.iterdir():
+                if entry.name.startswith(".") or not entry.name.startswith(encoded):
+                    continue
+                target = entry.resolve()
+                if target.parent != by_uuid7_path or not target.is_dir():
+                    log.warning(f"Ignoring dangling or foreign {kind} link: {entry} -> {target}")
+                    continue
+                (exact if entry.name == encoded else prefixed).add(target)
+
+        matches = exact or prefixed
+        if not matches:
+            raise FileNotFoundError(f"No {kind} matching '{alias}'.")
+        if len(matches) > 1:
+            names = ", ".join(sorted(m.name for m in matches))
+            raise ValueError(f"Ambiguous {kind} alias '{alias}', matches: {names}")
+        return matches.pop()
 
 
-    def inspect(self, **opts):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+    def _resolve_layer_path(self, layer: str):
+        from thirdparty.izba.path import image_name_encode
+        return self._resolve_alias(layer, self.layers_path, (
+            ("by_uuid7", layer.lower()),
+            ("by_sha256", layer.lower()),
+            ("by_name", image_name_encode(layer)),
+        ), "layer")
 
 
-    # Build base image.
-    def build(self, tags=None, exist_ok=False, **opts):
-        '''
-            build is for building base images
-            actual builds happen in construction under an auto-generated uuid7.
-            complete builds are moved to images folder
-            if tag provided, symlink from by_name / tag -> by_id / imageid
-        '''
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_driver:
-            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_driver().")
+    def _resolve_container_path(self, container: str):
+        from thirdparty.izba.path import image_name_encode
+        return self._resolve_alias(container, self.containers_path, (
+            ("by_uuid7", container.lower()),
+            ("by_name", image_name_encode(container)),
+        ), "container")
 
-        # TODO: Forbid all tags that look like uuid7.hex
 
-        # ! This isn't correct. It bails on first conflict, why check at all?
-        for tag in tags:
-            tag_path = self.images_path / "by_name" / tag
-            if tag_path.exists():
-                if exist_ok:
-                    return True
-                raise FileExistsError(f"Tag {tag} already used. Run rmi first.")
+    # *blobs are de-duplicated files that may be shared across layers/containers.
+    @property
+    def blobs(self):
+        from thirdparty.izba.layer import BlobStore
+        return BlobStore(self.layers_path / "blobs")
 
+
+    def layer(self, alias):
+        from thirdparty.izba.layer import Layer
+        return Layer.load(self._resolve_layer_path(alias), self.blobs)
+
+
+    def _container_from_path(self, container_path):
+        '''(driver, ContainerContext) of an existing container folder.'''
+        from thirdparty.izba.layer import ContainerContext, CONTAINER_RECORD, _read_yaml
+        from thirdparty.izba.driver import get_izba_driver_eps
+
+        record_fpath = container_path / CONTAINER_RECORD
+        if not record_fpath.exists():
+            raise FileNotFoundError(f"{container_path} has no {CONTAINER_RECORD}; not a container?")
+        record = _read_yaml(record_fpath)
+        parent = self.layer(stduuid.UUID(record["parent"]["id"]).hex) if record.get("parent") else None
+        driver = get_izba_driver_eps().create(record["driver"])
+        ctx = ContainerContext(
+            id=stduuid.UUID(record["id"]),
+            path=container_path,
+            socket_path=self.sockets_path / container_path.name,
+            parent=parent,
+            blobs=self.blobs,
+            record=record,
+        )
+        return driver, ctx
+
+
+    def _iter_layers(self):
+        from thirdparty.izba.layer import Layer
+        by_uuid7_path = self.layers_path / "by_uuid7"
+        if not by_uuid7_path.is_dir():
+            return
+        for entry in sorted(by_uuid7_path.iterdir()):
+            if entry.is_dir() and not entry.name.startswith("."):
+                try:
+                    yield Layer.load(entry, self.blobs)
+                except FileNotFoundError as e:
+                    log.warning(str(e))
+
+
+    def _iter_container_records(self):
+        from thirdparty.izba.layer import CONTAINER_RECORD, _read_yaml
+        by_uuid7_path = self.containers_path / "by_uuid7"
+        if not by_uuid7_path.is_dir():
+            return
+        for entry in sorted(by_uuid7_path.iterdir()):
+            if (entry / CONTAINER_RECORD).exists():
+                yield entry, _read_yaml(entry / CONTAINER_RECORD)
+
+
+    @staticmethod
+    def _check_forbidden_tags(tags):
+        for tag in tags or ():
+            if is_uuid7_hex(tag):
+                raise ValueError("A tag must not match the hex form of uuid7.")
+            if is_sha256(tag):
+                raise ValueError("A tag must not match the hex form of sha256.")
+
+
+    @staticmethod
+    def _link(link_path, target_path, replace=False):
+        import os
+        link_path.parent.mkdir(parents=True, exist_ok=True)
+        if link_path.is_symlink() or link_path.exists():
+            if not replace:
+                raise FileExistsError(f"{link_path} already exists.")
+            link_path.unlink()
+        link_path.symlink_to(os.path.relpath(target_path, start=link_path.parent))
+
+
+    @staticmethod
+    def _unlink_links_to(ns_path, target_path):
+        if not ns_path.is_dir():
+            return []
+        removed = []
+        target_path = target_path.resolve()
+        for entry in ns_path.iterdir():
+            if entry.is_symlink() and entry.resolve() == target_path:
+                entry.unlink()
+                removed.append(entry.name)
+        return removed
+
+
+    # --- Containers ---
+
+    def _new_container(self, driver, parent, name=None):
         from thirdparty.izba.uuid import uuid7
-        self.imageid = uuid7()
-        self.build_path = self.construction_path / self.imageid.hex
-        self.image_path = self.images_path / "by_id" / self.imageid.hex
+        from thirdparty.izba.layer import ContainerContext, new_container_record
+        from thirdparty.izba.path import image_name_encode
 
-        self.image_path.parent.mkdir(parents=True, exist_ok=True)
+        if parent is not None and parent.format != driver.layer_format:
+            raise ValueError(f"Driver {driver.name} ({driver.layer_format}) can't use layer "
+                             f"{parent.id.hex} ({parent.format}).")
 
-        # Create standard folders for build path
-        for folder in ['context', 'misc', 'artifacts', 'images', 'logs', 'run', 'mnt']:
-            (self.build_path / folder).mkdir(parents=True, exist_ok=True)
-        (self.build_path / "logs" / "console").mkdir(parents=True, exist_ok=True)
-        (self.build_path / "driver").write_text(self.driver_name)
-        self.run_path = self.run_base_path / self.imageid.hex
-        self.run_path.mkdir(mode=0o700, parents=True, exist_ok=True)
-
-        # TODO: Check the returns of all driver calls.
-        # Download the OS, kernel, and initrd
-        self.driver.cache_izba_base(self, **opts)
-        # Build data that could be used by init process
-        self.driver.build_izba_data(self, **opts)
-        # Build configuration and init process
-        self.driver.build_izba_init(self, **opts)
-        # Build the bundle exposed to app (w/ init process and data)
-        self.driver.build_izba_bundle(self, **opts)
-        # Initialize the izba
-        self.driver.build_izba(self, **opts)
-
-        # Move build_path to images / by_id
-        if self.image_path.exists():
-            raise FileExistsError(f"Image path {self.image_path} already exists.")
-        self.build_path.rename(self.image_path)
-
-        if tags:
-            import os
-            (self.images_path / "by_name").mkdir(parents=True, exist_ok=True)
-            for tag in tags:
-                from thirdparty.izba.path import image_name_encode
-                # TODO: Ensure tag does not use invalid characters on input.
-                tag_path = self.images_path / "by_name" / image_name_encode(tag)
-                #tag_path.symlink_to(self.image_path)
-                tag_path.symlink_to(os.path.relpath(self.image_path, start=tag_path.parent))
-
-        return True
+        container_id = uuid7()
+        container_path = self.containers_path / "by_uuid7" / container_id.hex
+        container_path.mkdir(parents=True)
+        ctx = ContainerContext(
+            id=container_id,
+            path=container_path,
+            socket_path=self.sockets_path / container_id.hex,
+            parent=parent,
+            blobs=self.blobs,
+            record=new_container_record(container_id, driver, parent),
+        )
+        ctx.socket_path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        ctx.save_record()
+        if name:
+            self._link(self.containers_path / "by_name" / image_name_encode(name), container_path)
+        return ctx
 
 
-    def create(self, name=None, exist_ok=False, **opts) -> bool:
+    def create(self, layer, name=None, driver=None, **opts):
+        '''Create a container from a layer. driver defaults to the layer's
+        driver; any driver with the same layer_format may be used.'''
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        from thirdparty.izba.driver import get_izba_driver_eps
+
+        parent = self.layer(layer) if isinstance(layer, str) else layer
+        driver_obj = get_izba_driver_eps().create(driver or parent.driver)
+        ctx = self._new_container(driver_obj, parent, name=name)
+        try:
+            driver_obj.create_container(self, ctx, **opts)
+        except BaseException:
+            self._remove_container(ctx)
+            raise
+        log.info(f"Created container {ctx.id.hex} from layer {parent.id.hex}")
+        return ctx
+
+
+    def import_(self, source, driver="microvm", name=None, tags=(), **opts):
+        '''Create a parentless layer from an external source, e.g. "ubuntu".'''
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        from thirdparty.izba.driver import get_izba_driver_eps
+
+        self._check_forbidden_tags(tags)
+        if isinstance(source, str):
+            source = {"import": source}
+        driver_obj = get_izba_driver_eps().create(driver)
+        ctx = self._new_container(driver_obj, None, name=name)
+        try:
+            driver_obj.import_container(self, ctx, source, **opts)
+        except BaseException:
+            self._remove_container(ctx)
+            raise
+        return self.commit(ctx.id.hex, tags=tags)
+
+
+    def _find_import_layer(self, driver, source):
+        '''Newest existing layer imported from an equivalent source, if any.
+
+        Sources are compared after driver.resolve_source() fills in defaults;
+        extra recorded keys (e.g. the download's sha256) are ignored.'''
+        resolved = driver.resolve_source(self, source)
+        found = None
+        for layer in self._iter_layers():
+            src = layer.manifest.get("source") or {}
+            if layer.parent_id is None and layer.format == driver.layer_format and \
+                    all(src.get(k) == v for k, v in resolved.items()):
+                found = layer  # uuid7 sorts by time; keep the newest
+        return found
+
+
+    def commit(self, container, tags=(), **opts):
+        '''Turn a stopped container into a layer (the container is consumed and
+        the layer keeps its id).'''
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        import os
+        import shutil
+        from thirdparty.izba.layer import (build_manifest, write_manifest, manifest_sha256,
+                                           Layer, LAYER_MANIFEST, CONTAINER_RECORD)
+
+        self._check_forbidden_tags(tags)
+        container_path = self._resolve_container_path(container)
+        driver, ctx = self._container_from_path(container_path)
+        if driver.container_is_running(self, ctx):
+            raise RuntimeError(f"Container {ctx.id.hex} is running; stop it before committing.")
+
+        layer_path = self.layers_path / "by_uuid7" / ctx.id.hex
+        if layer_path.exists():
+            raise FileExistsError(f"Layer path {layer_path} already exists.")
+        layer_path.parent.mkdir(parents=True, exist_ok=True)
+
+        artifacts = driver.commit_container(self, ctx, layer_path, **opts)
+        manifest = build_manifest(driver, ctx, artifacts)
+        write_manifest(container_path / LAYER_MANIFEST, manifest)
+        (container_path / CONTAINER_RECORD).unlink()
+
+        self._unlink_links_to(self.containers_path / "by_name", container_path)
+        try:
+            container_path.rename(layer_path)
+        except OSError:
+            # containers_path and layers_path on different filesystems.
+            shutil.move(container_path, layer_path)
+        shutil.rmtree(ctx.socket_path, ignore_errors=True)
+
+        sha256 = manifest_sha256(manifest)
+        self._link(self.layers_path / "by_sha256" / sha256, layer_path)
+        from thirdparty.izba.path import image_name_encode
+        for tag in tags or ():
+            # Like docker: a tag moves to the newest layer built with it.
+            self._link(self.layers_path / "by_name" / image_name_encode(tag), layer_path, replace=True)
+        log.info(f"Committed layer {ctx.id.hex} sha256:{sha256}")
+        print(ctx.id.hex)
+        return Layer(layer_path, manifest, self.blobs)
+
+
+    # Build a layer from a build spec (Izbafile).
+    def build(self, spec=None, tags=(), keep_failed=True, **opts):
         '''
-            create will create a new overlay disk image backed by origin-overlay
+            spec is a dict or a path to a yaml file:
+
+                from: <layer alias>        # or: from: {import: ubuntu}
+                driver: crt                # optional, defaults to the parent's driver
+                tags: [name, ...]          # optional, merged with tags
+                boot:                      # optional, driver specific
+                  root: LABEL=myroot       # root filesystem (root= kernel arg)
+                  cmdline: {quiet: false}  # other kernel args
+                provision:                 # optional, driver specific
+                  packages: [jq]
+                  runcmd: ["echo hi"]
+                  instance_prefix: dev     # cloud-init instance-id prefix
+                  hostname: devbox         # guest hostname
+
+            The layer is built as a container (create, provision) and then
+            committed. On failure the container is left for troubleshooting
+            (never resumed); remove it with `izba rm`.
         '''
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_image:
-            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_image().")
+        from pathlib import Path
+        from thirdparty.izba.driver import get_izba_driver_eps
 
-        from thirdparty.izba.path import generate_overlay_path, image_name_encode
-        if name is None:
-            self.overlay_path = generate_overlay_path(self.overlays_path)
-            self.overlay_name = self.overlay_path.name
+        if spec is None:
+            raise ValueError("build needs a spec (Izbafile) or --from.")
+        if not isinstance(spec, dict):
+            import yaml
+            spec = yaml.safe_load(Path(spec).read_text()) or {}
+        tags = sorted(set([*(spec.get("tags") or []), *(tags or [])]))
+        self._check_forbidden_tags(tags)
+
+        # *if the from has an import, its a layer from scratch (parentless)
+        base = spec.get("from")
+        if base is None:
+            raise ValueError("Build spec needs 'from'.")
+        if isinstance(base, dict):
+            if "import" not in base:
+                raise ValueError(f"Unknown 'from' source {base!r}; expected {{import: <distro>}}.")
+            import_driver = get_izba_driver_eps().create(spec.get("driver") or "microvm")
+            parent = self._find_import_layer(import_driver, base)
+            if parent is None:
+                print(f"Importing {base['import']}.")
+                parent = self.import_(base, driver=import_driver.name, **opts)
         else:
-            # TODO: Verify name contains no invalid characters
-            self.overlay_path = self.overlays_path / name
-            if self.overlay_path.exists():
-                if exist_ok:
-                    return True
-                raise FileExistsError(f"Overlay {name} already exists. Run rm first.")
-            self.overlay_name = self.overlay_path.name
+            parent = self.layer(str(base))
 
-        # Create standard folders for build path
-        for folder in ['artifacts', 'images', 'logs', 'run', 'mnt']:
-            (self.overlay_path / folder).mkdir(parents=True, exist_ok=True)
-        (self.overlay_path / "logs" / "console").mkdir(parents=True, exist_ok=True)
-        (self.overlay_path / "driver").write_text(self.driver_name)
+        driver = get_izba_driver_eps().create(spec.get("driver") or parent.driver)
+        ctx = self._new_container(driver, parent)
+        try:
+            # * create the folder
+            driver.create_container(self, ctx, **opts)
+            # * run the initial VM
+            driver.provision_container(self, ctx, spec, **opts)
+            # * after provision, VM should be stopped
+            if driver.container_is_running(self, ctx):
+                raise RuntimeError(f"Container {ctx.id.hex} still running after provision. Bug in driver?")
+        except BaseException:
+            if driver.container_is_running(self, ctx):
+                driver.stop_container(self, ctx)
+            if keep_failed:
+                print(f"Build failed; left container {ctx.id.hex} for inspection "
+                      f"(izba logs {ctx.id.hex[:12]}; izba rm {ctx.id.hex[:12]}).")
+            else:
+                self._remove_container(ctx)
+            raise
+        # * convert built container to layer
+        return self.commit(ctx.id.hex, tags=tags, **opts)
 
-        self.driver.create_izba_overlay(self)
 
-        (self.overlay_path / "base").symlink_to(self.image_path)
+    def start(self, container, exist_ok=False, **opts):
+        driver, ctx = self._container_from_path(self._resolve_container_path(container))
+        return driver.start_container(self, ctx, exist_ok=exist_ok, **opts)
 
+
+    def stop(self, container, **opts):
+        driver, ctx = self._container_from_path(self._resolve_container_path(container))
+        return driver.stop_container(self, ctx, **opts)
+
+
+    def exec(self, container, user='user', command=None, stdin=None, **opts):
+        driver, ctx = self._container_from_path(self._resolve_container_path(container))
+        return driver.exec_container(self, ctx, user=user, command=command, stdin=stdin, **opts)
+
+
+    def logs(self, container, **opts):
+        _, ctx = self._container_from_path(self._resolve_container_path(container))
+        # TODO: implement follow and allow different log objects (stdout vs console)
+        print((ctx.path / "logs" / "console.log").read_text(errors="replace"))
         return True
 
 
-    # Remove golden image.
-    def rmi(self, force=False, **opts):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-
+    def _remove_container(self, ctx):
         import shutil
+        self._unlink_links_to(self.containers_path / "by_name", ctx.path)
+        shutil.rmtree(ctx.path, ignore_errors=True)
+        shutil.rmtree(ctx.socket_path, ignore_errors=True)
 
-        #self.imageid, self.image_path, self.image_name = self._resolve_image_alias(image)
 
-        # iterate all overlays and get their image references
-        # iterate all image references and get their image ids
-
-        found = []
-        for overlay_path in self.overlays_path.iterdir():
-            image_path = overlay_path / "base"
-            if image_path.exists() and image_path.is_symlink():
-                if image_path.readlink() == self.image_path:
-                    found.append(overlay_path)
-        
-        if len(found) > 0:
-            raise Exception("Can not remove image referenced by overlay.")
-
-        db = {}
-        for entry in (self.images_path / "by_id").iterdir():
-            db[entry.name] = []
-        
-        for entry in (self.images_path / "by_name").iterdir():
-            db[entry.resolve().name].append(entry)
-            db[entry.name] = []
-        
-        for entry in (self.overlays_path).iterdir():
-            db[(entry / "base").resolve().name].append(entry)
-
-        if self.imageid is None:
-            raise FileNotFoundError("No matching image found.")
-
-        # TODO: This is kind of a mess...
-        if self.image_name:
-            # we were given a name
-            # race conditions aside, we can always remove names
-
+    def rm(self, container, force=False, **opts):
+        driver, ctx = self._container_from_path(self._resolve_container_path(container))
+        # TODO: force can be used to stop container before removing, but should be safe.
+        # TODO: unsafe can be used to remove the files while running or referenced
+        if driver.container_is_running(self, ctx):
             if not force:
-            #     # Show what will be lost.
-            #     n_files = sum(1 for p in root.rglob("*") if p.is_file())
-            #     size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
-            #     print(f"About to permanently delete:\n  {root}\n  {n_files} files, {size / 1e6:.1f} MB")
-
-                # Make the user type the name, not just 'y', to avoid reflex-confirming.
-                answer = input(f"Type the instance name ({self.image_name}) to confirm: ").strip()
-                if answer != f"{self.image_name}":
-                    print("Aborted.")
-                    return False
-
-            # TODO: Remove the by_name
-            (self.images_path / "by_name" / self.image_name).unlink()
-        
-            # with name, we expect to-be hanging images to have 1 reference
-            if len(db[self.imageid.hex]) > 1:
-                raise ValueError("Image used by overlay or image.")
-            shutil.rmtree(self.image_path)
-            return True
-        
-        # no name means only zero refs to image is ok to remove
-        if len(db[self.imageid.hex]) > 0:
-            raise ValueError("Image used by overlay or image.")
-        shutil.rmtree(self.image_path)
-
+                raise RuntimeError(f"Container {ctx.id.hex} is running; stop it first (or force).")
+            driver.stop_container(self, ctx)
+        self._remove_container(ctx)
+        log.info(f"Removed container {ctx.id.hex}")
         return True
 
 
-        # # TODO: Find all images "by_name" that point to self.image_path
-        # by_id_path = self.images_path / "by_id"
-        # by_name_path = self.images_path / "by_name"
-
-        # by_name_list = []
-        # for entry in by_name_path.iterdir():
-        #     if entry.resolve().name == self.image_path.name:
-        #         by_name_list.append(entry.resolve().name)
-        # if len(by_name_list) > 0:
-        #     return False
-                
-
-        # import shutil
-
-        # # Avoid relative escapes.
-        # from thirdparty.izba.path import image_name_encode
-        # root = self.images_path.resolve() / "by_image_name_encode(image)
-
-        # # Must be a folder
-        # if not root.is_dir():
-        #     print(f"Not a folder: {root}")
-        #     return False
-
-        # # Is it running?
-        # from thirdparty.izba.subprocess import read_pid
-        # from thirdparty.izba.subprocess.qemu import is_qemu_process
-        # pid = read_pid(root / "run" / "qemu.pid")
-        # if pid is not None and is_qemu_process(pid):
-        #     print(f"Refusing: {root.parent.name}/{root.name} is running (pid {pid}). Stop it first.")
-        #     return False
-
-        # # TODO: Do no allow delete if there are any overlays (w/o force).
-
-        # if not force:
-        #     # Show what will be lost.
-        #     n_files = sum(1 for p in root.rglob("*") if p.is_file())
-        #     size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
-        #     print(f"About to permanently delete:\n  {root}\n  {n_files} files, {size / 1e6:.1f} MB")
-
-        #     # Make the user type the name, not just 'y', to avoid reflex-confirming.
-        #     answer = input(f"Type the instance name ({root.parent.name}/{root.name}) to confirm: ").strip()
-        #     if answer != f"{root.parent.name}/{root.name}":
-        #         print("Aborted.")
-        #         return False
-
-        # shutil.rmtree(root)
-        # log.info("Deleted.")
-        return True
+    def run(self, layer, name=None, user='user', command=None, stdin=None, **opts):
+        '''create, start, exec, stop and rm in one go. Never builds.'''
+        ctx = self.create(layer, name=name, **opts)
+        driver, ctx = self._container_from_path(ctx.path)
+        try:
+            driver.start_container(self, ctx, **opts)
+            driver.container_ready_wait(self, ctx)
+            # TODO: If --rm or remove=True, the container should be stopped and removed.
+            return driver.exec_container(self, ctx, user=user, command=command, stdin=stdin, **opts)
+        finally:
+            if driver.container_is_running(self, ctx):
+                driver.stop_container(self, ctx)
+            self._remove_container(ctx)
 
 
-    # Remove instance image (and all overlay images).
-    # qemu must be shutdown?
-    def rm(self, force=False, **opts):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_overlay:
-            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
+    # --- Layers ---
 
+    def rmi(self, layer, **opts):
+        '''Remove a layer name; remove the layer itself once it has no names
+        left, no child layers and no containers.'''
         import shutil
+        from thirdparty.izba.path import image_name_encode
 
-        # Avoid relative escapes.
-        root = self.overlay_path.resolve()
+        layer_path = self._resolve_layer_path(layer)
+        layer_id = layer_path.name
 
-        # Must be a folder
-        if not root.is_dir():
-            print(f"Not a folder: {root}")
-            return False
+        untagged = False
+        name_link = self.layers_path / "by_name" / image_name_encode(layer)
+        if name_link.is_symlink() and name_link.resolve() == layer_path.resolve():
+            name_link.unlink()
+            untagged = True
+            print(f"Untagged: {layer}")
+            if any(e.is_symlink() and e.resolve() == layer_path.resolve()
+                   for e in (self.layers_path / "by_name").iterdir()):
+                return True
 
-        # Is it running?
-        from thirdparty.izba.subprocess import read_pid
-        from thirdparty.izba.subprocess.qemu import is_qemu_process
-        pid = read_pid(self.run_path / "qemu.pid")
-        if pid is not None and is_qemu_process(pid):
-            print(f"Refusing: {self.overlay_name} is running (pid {pid}). Stop it first.")
-            return False
+        children = [l.id.hex for l in self._iter_layers()
+                    if l.parent_id is not None and l.parent_id.hex == layer_id]
+        users = [p.name for p, rec in self._iter_container_records()
+                 if rec.get("parent") and stduuid.UUID(rec["parent"]["id"]).hex == layer_id]
+        if children or users:
+            if untagged:
+                # Like docker: an in-use layer just loses its name.
+                log.info(f"Layer {layer_id} kept (used by layers {children}, containers {users}).")
+                return True
+            raise ValueError(f"Layer {layer_id} is used by layers {children} and containers {users}.")
 
-        if not force:
-            # Show what will be lost.
-            n_files = sum(1 for p in root.rglob("*") if p.is_file())
-            size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
-            print(f"About to permanently delete:\n  {root}\n  {n_files} files, {size / 1e6:.1f} MB")
-
-            # Make the user type the name, not just 'y', to avoid reflex-confirming.
-            answer = input(f"Type the profile and overlay name ({self.overlay_name}) to confirm: ").strip()
-            if answer != self.overlay_name:
-                print("Aborted.")
-                return False
-
-        shutil.rmtree(root)
-        if not force:
-            log.info("Deleted.")
+        self._unlink_links_to(self.layers_path / "by_name", layer_path)
+        self._unlink_links_to(self.layers_path / "by_sha256", layer_path)
+        shutil.rmtree(layer_path)
+        # TODO: Garbage collect blobs no manifest references.
+        log.info(f"Removed layer {layer_id}")
         return True
-
-
-    # If instance image missing, call create()
-    def start(self, exist_ok=False, **opts) -> bool:
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_overlay:
-            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
-        
-        # TODO: Do some sanity checks here.
-        
-        return self.driver.start_izba(self, exist_ok=exist_ok, **opts)
-
-
-    # Kill with pidfile
-    def stop(self, **opts):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_overlay:
-            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
-
-        if self.driver is None:
-            log.error("Driver is unavailable. Exiting.")
-            return False
-
-        self.driver.stop_izba(self)
-        return True
-
-
-    def logs(self, user='user', golden=False, **opts):
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_overlay:
-            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
-
-        logfile_fpath = self.overlay_path / "logs" / "console.log"
-        print(logfile_fpath.read_text())
-
-
-    # Run ssh command in VM
-    def exec(self, user='user', command=None, stdin=None, **opts) -> bool:
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_overlay:
-            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_overlay().")
-
-        self.driver.exec_izba_command(self, user=user, command=command, stdin=stdin, **opts)
-
-
-    # If instance image missing, call create()
-    def run(self, name=None, network='none', user='user', command=None, stdin=None, **opts):
-        '''
-            run is intended to create, start, exec a given command, and optionally stop an instance VM.
-            run is the only command that should implicitly do a sequence of create, start, exec, stop.
-            run should not run build
-        '''
-        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        if not self._with_image:
-            raise RuntimeError(f"{sys._getframe().f_code.co_qualname} requires with_image().")
-
-        if not self.create(name=name, network='none', console='none', **opts):
-            print("Failed to create instance.")
-            return False
-        
-        # Do the with_overlay stuff required for start, exec, stop, and rm
-        self.with_overlay(self.overlay_name)
-        
-        if not self.start(network='none', console='none', **opts):
-            print("Failed to start instance.")
-            return False
-
-        # Wait until the overlay is ready to receive commands.
-        self.driver.run_ready_wait(self)
-        
-        ret = False
-        if self.exec(user='user', command=command, stdin=None, network='none', **opts):
-            ret = True
-
-        self.stop(**opts)
-        
-        self.rm(force=True, **opts)
-
-        return ret
-
-
-    # Copy from VM to host:
-    # - If VM running, we need to snapshot, copy, commit.
-    # - If VM shutdown we simply dissect.target the file out.
-    # Copy to VM:
-    # - If VM running, scp.
-    # - If VM not running, need read from another VM. libguestfs?
-    # def izba_cp(self, name='default', **opts):
-    #     print(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-
-    # # Replace ./profile/name with contents of tar.
-    # def load(self, **opts):
-    #     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-
-
-    # # Tar contents of ./profile/name (minus instance) to path.
-    # def save(self, **opts):
-    #     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")

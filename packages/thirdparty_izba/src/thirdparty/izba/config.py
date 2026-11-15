@@ -37,9 +37,9 @@ def baseline_empty_config():
         # Consider having a "dotenv" for credentials.
         "base_path": None,         # base path of izba
         "cache_path": None,        # IZBA_BASE_PATH / "cache" - long lived things for reuse
-        "construction_path": None, # IZBA_BASE_PATH / "construction" - in-motion, no-touchy!
-        "images_path": None,       # IZBA_BASE_PATH / "images" container-imgage-ish
-        "overlays_path": None,     # IZBA_BASE_PATH / "overlays" - container-ish
+        "downloads_path": None,    # IZBA_CACHE_PATH / "downloads"
+        "layers_path": None,       # IZBA_CACHE_PATH / "layers"
+        "containers_path": None,     # IZBA_BASE_PATH / "overlays" - container-ish
         "socket_base_path": None,  # This one should stay None, recommend less than 75 bytes.
 
         "downloads": {
@@ -48,11 +48,15 @@ def baseline_empty_config():
                     'cache': "alpine-3.24.2-x86_64-cloudinit-r2.qcow2",
                     'upstream': f"https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/cloud/alpine-3.24.2-x86_64-cloudinit-r2.qcow2",
                     'bootfiles': ["/boot/vmlinuz-virt", "/boot/initramfs-virt"],
+                    # Root filesystem as named in the image's /etc/fstab.
+                    'root': "LABEL=/",
                 },
                 "ubuntu": {
                     'cache': "noble-server-cloudimg-amd64.img",
                     'upstream': "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
                     'bootfiles': ["/boot/vmlinuz", "/boot/initrd.img"],
+                    # Root filesystem as named in the image's /etc/fstab.
+                    'root': "LABEL=cloudimg-rootfs",
                 },
             }
         }
@@ -79,7 +83,7 @@ def load_izba_config(config_path=None, user_config={}):
     import yaml
 
     if config_path is None:
-        config_path = xdg_config_home() / "izba" / "config.yaml"
+        config_path = izba_xdg_config_home()
         if not config_path.exists():
             log.info(f"Config not found at: {config_path}, using defaults.")
     else:
@@ -95,9 +99,9 @@ def load_izba_config(config_path=None, user_config={}):
 
     config["base_path"] = os.environ.get("IZBA_BASE_PATH", config["base_path"])
     config["cache_path"] = os.environ.get("IZBA_CACHE_PATH", config["cache_path"])
-    config["construction_path"] = os.environ.get("IZBA_CONSTRUCTION_PATH", config["construction_path"])
-    config["images_path"] = os.environ.get("IZBA_IMAGES_PATH", config["images_path"])
-    config["overlays_path"] = os.environ.get("IZBA_OVERLAYS_PATH", config["overlays_path"])
+    config["downloads_path"] = os.environ.get("IZBA_DOWNLOADS_PATH", config["downloads_path"])
+    config["layers_path"] = os.environ.get("IZBA_LAYERS_PATH", config["layers_path"])
+    config["containers_path"] = os.environ.get("IZBA_CONTAINERS_PATH", config["containers_path"])
     config["socket_base_path"] = os.environ.get("IZBA_SOCKET_BASE_PATH", config["socket_base_path"])
 
     # User config has priority here, but should never be used in base library.
@@ -110,7 +114,7 @@ def save_izba_config(config:dict={}, config_path=None, force:bool=False):
     import yaml
 
     if config_path is None:
-        config_path = xdg_config_home() / "izba" / "config.yaml"
+        config_path = izba_xdg_config_home()
     config_path = config_path.resolve()
 
     if config_path.exists() and not force:
@@ -119,13 +123,17 @@ def save_izba_config(config:dict={}, config_path=None, force:bool=False):
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(str(config_path), "w") as f:
-        yaml.dump(deep_merge(baseline_empty_config(), config), f, sort_keys=False)
+    with open(str(config_path), "w") as fobj:
+        yaml.dump(deep_merge(baseline_empty_config(), config), fobj, sort_keys=False)
 
 
-def implicit_base_path():
+def resolve_base_path(config=None):
+    # Assumes config already loaded.
+    if config and "base_path" in config and config["base_path"] is not None:
+        return Path(config["base_path"]).resolve()
+    
     # Worst case, use local folder.
-    base_path = Path('.') / "izba"
+    base_path = DEFAULT_WORST_CASE_IZBA_BASE_PATH
     
     # Best implicit case, use venv as base prefix.
     if sys.prefix != sys.base_prefix:
@@ -135,60 +143,29 @@ def implicit_base_path():
     return base_path.resolve()
 
 
-def resolve_base_path(config=None):
+def resolve_child_path(rel_path, key_name, config=None):
     # Assumes config already loaded.
-    if config and "base_path" in config and config["base_path"] is not None:
-        return Path(config["base_path"]).resolve()
+    if config and key_name in config and config[key_name] is not None:
+        return Path(config[key_name]).resolve()
+    return (resolve_base_path(config) / rel_path).resolve()
 
-    return Path(implicit_base_path())
 
-
-def implicit_cache_path(base_path=DEFAULT_WORST_CASE_IZBA_BASE_PATH):
-    return (Path(base_path) / "cache").resolve()
+def resolve_containers_path(config=None):
+    return resolve_child_path("containers", "containers_path", config=config)
 
 
 def resolve_cache_path(config=None):
-    # Assumes config already loaded.
-    if config and "cache_path" in config and config["cache_path"] is not None:
-        return Path(config["cache_path"]).resolve()
-
-    return Path(implicit_cache_path(base_path=resolve_base_path(config)))
+    return resolve_child_path("cache", "cache_path", config=config)
 
 
-def implicit_construction_path(base_path=DEFAULT_WORST_CASE_IZBA_BASE_PATH):
-    return (Path(base_path) / "construction").resolve()
+def resolve_downloads_path(config=None):
+    cache_path = resolve_cache_path(config)
+    return resolve_child_path(cache_path / "downloads", "downloads_path", config=config)
 
 
-def resolve_construction_path(config=None):
-    # Assumes config already loaded.
-    if config and "construction_path" in config and config["construction_path"] is not None:
-        return Path(config["construction_path"]).resolve()
-
-    return Path(implicit_construction_path(base_path=resolve_base_path(config)))
-
-
-def implicit_images_path(base_path=DEFAULT_WORST_CASE_IZBA_BASE_PATH):
-    return (Path(base_path) / "images").resolve()
-
-
-def resolve_images_path(config=None):
-    # Assumes config already loaded.
-    if config and "images_path" in config and config["images_path"] is not None:
-        return Path(config["images_path"]).resolve()
-
-    return Path(implicit_images_path(base_path=resolve_base_path(config)))
-
-
-def implicit_overlays_path(base_path=DEFAULT_WORST_CASE_IZBA_BASE_PATH):
-    return (Path(base_path) / "overlays").resolve()
-
-
-def resolve_overlays_path(config=None):
-    # Assumes config already loaded.
-    if config and "overlays_path" in config and config["overlays_path"] is not None:
-        return Path(config["overlays_path"]).resolve()
-
-    return Path(implicit_overlays_path(base_path=resolve_base_path(config)))
+def resolve_layers_path(config=None):
+    cache_path = resolve_cache_path(config)
+    return resolve_child_path(cache_path / "layers", "layers_path", config=config)
 
 
 # Linux sun_path is 108 bytes including the trailing NUL (104 on macOS/BSD).
@@ -196,7 +173,11 @@ def resolve_overlays_path(config=None):
 # less than 32, you get 75 for path (including slashes).
 
 
-def implicit_socket_path(uid=None) -> Path:
+def resolve_socket_base_path(config=None, uid=None) -> Path:
+    # Assumes config already loaded.
+    if config and "socket_base_path" in config and config["socket_base_path"] is not None:
+        return Path(config["socket_base_path"]).resolve()
+
     """
     Return a directory for sockets files.
 
@@ -260,9 +241,3 @@ def implicit_socket_path(uid=None) -> Path:
     raise RuntimeError("no usable socket directory found")
 
 
-def resolve_socket_base_path(config=None):
-    # Assumes config already loaded.
-    if config and "socket_base_path" in config and config["socket_base_path"] is not None:
-        return Path(config["socket_base_path"]).resolve()
-
-    return Path(implicit_socket_path())

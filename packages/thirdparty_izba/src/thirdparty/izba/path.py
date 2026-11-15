@@ -14,9 +14,6 @@ def image_name_decode(folder: str) -> str:
     return folder.translate(_DEC)
 
 
-
-
-
 ADJECTIVES = (
     "amber", "ancient", "bold", "brave", "bright", "brisk", "calm", "careful",
     "clever", "cosy", "curious", "daring", "eager", "elegant", "faithful",
@@ -44,14 +41,14 @@ NOUNS = (
     "willow", "wolf", "wren", "yarrow", "zephyr",
 )
 
-def generate_overlay_path(overlays_path) -> str:
+def generate_path(parent_path: Path) -> str:
  
     import random
     for _ in range(len(NOUNS) * len(ADJECTIVES)):
         try:
-            overlay_path = overlays_path / f"{random.choice(ADJECTIVES)}_{random.choice(NOUNS)}"
-            overlay_path.mkdir(parents=True)
-            return overlay_path
+            result_path = parent_path / f"{random.choice(ADJECTIVES)}_{random.choice(NOUNS)}"
+            result_path.mkdir(parents=True)
+            return result_path
         except:
             continue
  

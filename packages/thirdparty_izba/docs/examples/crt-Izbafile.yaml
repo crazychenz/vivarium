@@ -1,0 +1,19 @@
+from:
+  import: ubuntu
+provision:
+  instance_prefix: crt
+  packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+    - podman
+    - uidmap
+    - slirp4netns
+    - fuse-overlayfs
+    - passt
+  runcmd:
+    - systemctl enable --now docker containerd
+    - loginctl enable-linger user
+tags: [crt]

@@ -20,9 +20,15 @@ class DriverIndex():
 
 
     def create(self, name):
+        if name not in self._index:
+            raise KeyError(f"No izba driver {name!r}; have {sorted(self._index)}")
         driver_cls = self._index[name]['class']
         driver_opts = self._index[name]['opts']
-        return driver_cls(**driver_opts)
+        driver = driver_cls(**driver_opts)
+        # The registry, not the class, owns the name (one class may be
+        # registered under several names with different opts).
+        driver.name = name
+        return driver
         
 
 
@@ -43,7 +49,11 @@ def get_izba_driver_eps():
         eps = entry_points(group="thirdparty_izba_drivers")
 
     for ep in eps:
-        ep.load()(index)
+        # One broken driver plugin shouldn't take down every izba command.
+        try:
+            ep.load()(index)
+        except Exception as e:
+            log.warning(f"Skipping izba driver entry point {ep.name!r}: {e}")
 
     return index
 
