@@ -141,6 +141,7 @@ def build_manifest(driver, ctr_ctx: "ContainerContext", artifacts: dict) -> dict
                 rel = Path(new["path"])
                 if rel.is_absolute() or ".." in rel.parts:
                     raise ValueError(f"Slot {slot!r} path {new['path']!r} must be relative to the layer folder.")
+                # TODO: I don't like new as a label name.
                 if "sha256" not in new:
                     raise ValueError(f"Slot {slot!r} path {new['path']!r} needs a sha256.")
                 if not (ctr_ctx.path / rel).is_file():

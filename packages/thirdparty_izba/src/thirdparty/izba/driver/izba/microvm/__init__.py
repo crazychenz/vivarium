@@ -295,7 +295,9 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         and "<prefix>-<last 8 hex of the layer id>".'''
         if "instance_prefix" in provision:
             prefix = str(provision["instance_prefix"])
-            if not _INSTANCE_PREFIX_RE.fullmatch(prefix):
+            import re
+            # cloud-init instance-id prefix: a plain token.
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", prefix):
                 raise ValueError(f"provision.instance_prefix {prefix!r}: use letters, digits, "
                                  f"'.', '_' or '-' (max 63, starting with a letter or digit).")
             ctr_ctx.set_value("instance_prefix", prefix)
