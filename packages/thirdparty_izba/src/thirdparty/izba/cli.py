@@ -81,6 +81,10 @@ def init_argparse():
 
     # --- izba create [opts] <layer>         # create a container from a layer
     izba_create_parser = izba_subparsers.add_parser("create")
+    # unused
+    izba_run_parser.add_argument("-i", dest='stdin', action="store_true")
+    izba_run_parser.add_argument("-t", dest='tty', action="store_true")
+    # used
     izba_create_parser.add_argument("--name", dest='name', default=None)
     izba_create_parser.add_argument("--driver", default=None)
     izba_create_parser.add_argument("layer")
@@ -109,6 +113,11 @@ def init_argparse():
 
     # --- izba exec [opts] <container> [-- command]   # implicitly tty + stdin -> shell
     izba_exec_parser = izba_subparsers.add_parser("exec")
+    # unused
+    izba_run_parser.add_argument("-i", dest='stdin', action="store_true")
+    izba_run_parser.add_argument("-t", dest='tty', action="store_true")
+    izba_run_parser.add_argument("-d", dest='tty', action="store_true")
+    # used
     izba_exec_parser.add_argument("-u", dest='user', default='user')
     izba_exec_parser.add_argument("container")
     izba_exec_parser.set_defaults(func=izba_exec_func)
@@ -120,8 +129,15 @@ def init_argparse():
 
     # --- izba run [opts] <vm> [<name>] -- <args> # run process in vm `izba run -C /path/to/def -- podman build`
     izba_run_parser = izba_subparsers.add_parser("run")
+    # unused
+    izba_run_parser.add_argument("-i", dest='stdin', action="store_true")
+    izba_run_parser.add_argument("-t", dest='tty', action="store_true")
+    izba_run_parser.add_argument("-d", dest='tty', action="store_true")
+    # used
     izba_run_parser.add_argument("-u", dest='user', default='user')
     izba_run_parser.add_argument("--name", default=None)
+    izba_run_parser.add_argument("--rm", dest='remove', action="store_true", default=False,
+                                 help="remove the container when the command exits")
     izba_run_parser.add_argument("layer")
     izba_run_parser.set_defaults(func=izba_run_func)
     izba_run_parser.usage = (
@@ -212,7 +228,7 @@ def izba_rmi_func(args, config):
 def izba_run_func(args, config):
     from thirdparty.izba.subprocess import stdin_if_noninteractive
     ok = Izba(config).run(args.layer, name=args.name, user=args.user, command=args.cmd,
-                          stdin=stdin_if_noninteractive())
+                          stdin=stdin_if_noninteractive(), remove=args.remove)
     if not ok:
         exit(1)
 

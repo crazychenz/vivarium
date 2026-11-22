@@ -46,7 +46,8 @@ Every layer starts life as a container and becomes a layer by commit.
 
 `izba build` is `create_container` → `provision_container` → `commit_container`.
 `izba run` is `create_container` → `start_container` → `container_ready_wait` →
-`exec_container` → `stop_container`, followed by removal of the container.
+`exec_container` → `stop_container`, followed by removal of the container
+with `--rm`.
 
 ## Driver class attributes
 

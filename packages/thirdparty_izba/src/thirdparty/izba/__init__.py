@@ -568,19 +568,19 @@ class Izba():
         return True
 
 
-    def run(self, layer, name=None, user='user', command=None, stdin=None, **opts):
-        '''create, start, exec, stop and rm in one go. Never builds.'''
+    def run(self, layer, name=None, user='user', command=None, stdin=None, remove=False, **opts):
+        '''create, start, exec and stop in one go (and rm when remove=True). Never builds.'''
         ctr_ctx = self.create(layer, name=name, **opts)
         driver, ctr_ctx = self._container_from_path(ctr_ctx.path)
         try:
             driver.start_container(self, ctr_ctx, **opts)
             driver.container_ready_wait(self, ctr_ctx)
-            # TODO: If --rm or remove=True, the container should be stopped and removed.
             return driver.exec_container(self, ctr_ctx, user=user, command=command, stdin=stdin, **opts)
         finally:
             if driver.container_is_running(self, ctr_ctx):
                 driver.stop_container(self, ctr_ctx)
-            self._remove_container(ctr_ctx)
+            if remove:
+                self._remove_container(ctr_ctx)
 
 
     # --- Layers ---

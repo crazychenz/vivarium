@@ -297,7 +297,7 @@ $ izba stop work
 $ izba commit -t devbox-notes work
 01a1debe4a64745c9eade21a49e9bfe6
 
-$ izba run devbox-notes -- cat /home/user/notes.txt
+$ izba run --rm devbox-notes -- cat /home/user/notes.txt
 notes
 ```
 
@@ -309,14 +309,18 @@ always do a normal boot.
 
 ## One-off commands with run
 
-`izba run` creates a temporary container, starts it, waits until it's ready,
-runs the command, then stops and removes the container. Nothing is kept.
+`izba run` creates a container, starts it, waits until it's ready, runs the
+command, then stops the container. The stopped container is kept (see
+`izba ps -a`) unless you pass `--rm`, which removes it once the command exits.
 
 ```console
-$ izba run devbox -- 'jq --version'
+$ izba run --rm devbox -- 'jq --version'
 jq-1.7
 
-$ izba run -u root devbox -- 'apt list --installed 2>/dev/null | wc -l'
+$ izba run --rm -u root devbox -- 'apt list --installed 2>/dev/null | wc -l'
+
+$ izba run --name scratch devbox -- 'touch /home/user/x; sync'
+$ izba ps -a                      # scratch is kept, stopped
 ```
 
 `izba run` exits with status 1 if the command fails. Without `-- command`, it
