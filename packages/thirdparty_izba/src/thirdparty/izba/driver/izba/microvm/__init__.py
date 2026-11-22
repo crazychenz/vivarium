@@ -7,7 +7,7 @@ log = logging.getLogger(__name__)
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Sequence, Tuple, Union
-from thirdparty.izba.driver.izba.microvm.microvm import CommonQemuPaths, QemuMicroVmCommand
+from thirdparty.izba.driver.izba.microvm.lib import CommonQemuPaths, QemuMicroVmCommand
 from thirdparty.izba.layer import CHAIN, INHERIT, LOCAL
 
 if TYPE_CHECKING:
