@@ -1,0 +1,29 @@
+# The Dockerfile's build environment as an izba chroot_debian layer: no root, no
+# container engine, no namespaces, no VM (see run-rootless.sh). Build and run:
+#
+#   izba build -f docs/examples/build-qemu-Izbafile.yaml scripts/qemu-system-builder/context
+#
+# The build context (the folder argument) is bound at /context while building.
+#   izba run --rm -v ./out:/out qemu-system-builder
+#
+# The import (Ubuntu base) is its own layer and is reused by later builds.
+from:
+  import: ubuntu
+  suite: noble          # Keep in step with the Dockerfile's FROM.
+  deb_src: true         # build-deps.sh fetches library sources with apt-get source
+driver: chroot_debian
+tags: [qemu-system-builder]
+provision:
+  #binds: [./context:/context]   # relative to the build context; only while building
+  env:
+    QEMU_VERSION: 11.0.3
+  runcmd:
+    - install -m 0755 /context/install-deps.sh /context/build-deps.sh /context/build.sh /usr/local/bin/
+    # 1. Build tools (compiler, musl toolchain, meson, ...).
+    - /usr/local/bin/install-deps.sh
+    # 2. Every library QEMU links, built from source as static musl libraries.
+    - /usr/local/bin/build-deps.sh
+    # 3. QEMU source (upstream release tarball, includes the prebuilt firmware blobs).
+    - mkdir -p /src && curl -fsSL "https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz" | tar -xJ -C /src --strip-components=1
+config:
+  entrypoint: [/usr/local/bin/build.sh]

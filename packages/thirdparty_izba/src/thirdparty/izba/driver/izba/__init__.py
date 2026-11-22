@@ -43,6 +43,15 @@ class IzbaAbstractBaseDriver():
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
 
 
+    # What identifies an import: a build `from: {import: ...}` reuses an existing
+    # parentless layer whose recorded source has the same key. Drivers whose
+    # sources take more options (suite, mirror, ...) fill in their defaults here.
+    def import_source_key(self, source) -> dict:
+        from thirdparty.izba.config import DEFAULT_PLATFORM_ARCH
+        return {"import": source["import"],
+                "platform_arch": source.get("platform_arch") or DEFAULT_PLATFORM_ARCH}
+
+
     # Populate a new container from ctr_ctx.parent (e.g. a root disk backed by the
     # parent's root disk, copies of instance-copy slots).
     def create_container(self, izba, ctr_ctx, **opts):
@@ -83,5 +92,19 @@ class IzbaAbstractBaseDriver():
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
 
 
-    def exec_container(self, izba, ctr_ctx, user='user', command=None, stdin=None, **opts):
+    # user=None: the driver's default user.
+    def exec_container(self, izba, ctr_ctx, user=None, command=None, stdin=None, **opts):
         raise NotImplementedError(f"{sys._getframe().f_code.co_qualname} not implemented.")
+
+
+    # `izba run`: run command in a fresh container and return True on success.
+    # Default: start, wait until ready, exec, stop. Drivers where starting already
+    # runs the workload (an entrypoint) override this.
+    def run_container(self, izba, ctr_ctx, user=None, command=None, stdin=None, **opts):
+        try:
+            self.start_container(izba, ctr_ctx, **opts)
+            self.container_ready_wait(izba, ctr_ctx)
+            return self.exec_container(izba, ctr_ctx, user=user, command=command, stdin=stdin, **opts)
+        finally:
+            if self.container_is_running(izba, ctr_ctx):
+                self.stop_container(izba, ctr_ctx)

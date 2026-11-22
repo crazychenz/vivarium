@@ -176,8 +176,16 @@ Put the root filesystem in `boot.root`, not in `boot.cmdline`: a `root` key in
 ```sh
 izba build -f Izbafile.yaml                      # tags come from the spec
 izba build -f Izbafile.yaml -t devbox -t latest  # plus extra tags
+izba build ./ctx                                 # ./ctx/Izbafile.yaml, paths relative to ./ctx
+izba build -f examples/x.yaml ./ctx              # any spec, paths relative to ./ctx
 izba build --from devbox -t devbox-crt --driver crt
 ```
+
+The optional context folder is what relative host paths in the spec (such as
+chroot_debian's `provision.binds`) resolve against; without one they resolve
+against the spec's folder. With a context and no `-f`, the spec is
+`CONTEXT/Izbafile.yaml`. chroot_debian also binds the context at `/context`
+while building (`provision.context` picks another guest path, `false` none).
 
 `--from` and `--driver` override the spec's values, or replace the spec
 entirely when there's no `-f`. Tags from the spec and from `-t` are combined.
@@ -377,8 +385,9 @@ from drivers with the same on-disk format can be stacked on each other.
 | `microvm` | The base: an Ubuntu qemu microvm, with SSH access for `user` and `root`. |
 | `crt` | Docker and Podman (rootless) installed and enabled for `user`. |
 | `vivarium_agentvm`, `vivarium_enclosurevm` | Vivarium environments, installed with the vivarium package. |
+| `chroot_debian` | Not a VM: a Debian/Ubuntu rootfs run under proot as fake root (`chroot/1` format, see [drivers.md](drivers.md#the-chroot_debian-driver)). |
 
-All four share the `microvm/1` format, so you can, for example, build a `crt`
+The first four share the `microvm/1` format, so you can, for example, build a `crt`
 layer on a plain `microvm` layer:
 
 ```sh

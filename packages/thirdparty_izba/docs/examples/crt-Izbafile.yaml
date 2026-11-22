@@ -1,5 +1,6 @@
 from:
   import: ubuntu
+driver: microvm
 provision:
   instance_prefix: crt
   packages:

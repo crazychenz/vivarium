@@ -83,11 +83,13 @@ class Izba():
         shas = self._reverse_links(self.layers_path / "by_sha256", by_uuid7_path)
         return uuids, names, shas
 
-    def _container_is_running(self, uuid7_hex):
-        from thirdparty.izba.subprocess import is_pid_alive, read_pid
-        from thirdparty.izba.subprocess.qemu import is_qemu_process
-        pid = read_pid(self.sockets_path / uuid7_hex / "qemu.pid")
-        return bool(pid and is_pid_alive(pid) and is_qemu_process(pid))
+    def _container_is_running(self, container_path):
+        try:
+            driver, ctr_ctx = self._container_from_path(container_path)
+            return bool(driver.container_is_running(self, ctr_ctx))
+        except Exception as e:  # a broken record or missing driver shouldn't break ps
+            log.warning(f"Can't tell whether {container_path.name} is running: {e}")
+            return False
 
     # List running VMs, [-a] list all instance VMs
     def ps(self, all=False, **opts):
@@ -105,7 +107,7 @@ class Izba():
         for entry in entries:
             if not entry.is_dir():
                 continue
-            running = self._container_is_running(entry.name)
+            running = self._container_is_running(entry)
             if not running and not all:
                 continue
 
@@ -397,16 +399,19 @@ class Izba():
     def _find_import_layer(self, driver, source):
         '''Newest existing layer imported from an equivalent source, if any.
 
-        Compares import (distro) and platform_arch; other recorded keys (e.g.
-        the download's sha256) are ignored.'''
-        from thirdparty.izba.config import DEFAULT_PLATFORM_ARCH
-        wanted = (source["import"], source.get("platform_arch") or DEFAULT_PLATFORM_ARCH)
+        Compares driver.import_source_key() of both (for microvm: import and
+        platform_arch; other recorded keys, e.g. the download's sha256, are ignored).'''
+        wanted = driver.import_source_key(source)
         found = None
         for layer in self._iter_layers():
             src = layer.manifest.get("source") or {}
-            if layer.parent_id is None and layer.format == driver.layer_format and \
-                    (src.get("import"), src.get("platform_arch")) == wanted:
-                found = layer  # uuid7 sorts by time; keep the newest
+            if layer.parent_id is not None or layer.format != driver.layer_format or "import" not in src:
+                continue
+            try:
+                if driver.import_source_key(src) == wanted:
+                    found = layer  # uuid7 sorts by time; keep the newest
+            except (KeyError, ValueError):
+                continue
         return found
 
 
@@ -456,7 +461,7 @@ class Izba():
 
 
     # Build a layer from a build spec (Izbafile).
-    def build(self, spec=None, tags=(), keep_failed=True, **opts):
+    def build(self, spec=None, tags=(), keep_failed=True, spec_dir=None, **opts):
         '''
             spec is a dict or a path to a yaml file:
 
@@ -472,6 +477,9 @@ class Izba():
                   instance_prefix: dev     # cloud-init instance-id prefix
                   hostname: devbox         # guest hostname
 
+            spec_dir: what relative host paths in the spec are relative to
+            (default: the spec file's folder, else the current folder).
+
             The layer is built as a container (create, provision) and then
             committed. On failure the container is left for troubleshooting
             (never resumed); remove it with `izba rm`.
@@ -484,7 +492,9 @@ class Izba():
             raise ValueError("build needs a spec (Izbafile) or --from.")
         if not isinstance(spec, dict):
             import yaml
+            spec_dir = spec_dir or Path(spec).resolve().parent
             spec = yaml.safe_load(Path(spec).read_text()) or {}
+        spec_dir = Path(spec_dir or Path.cwd()).resolve()
         tags = sorted(set([*(spec.get("tags") or []), *(tags or [])]))
         self._check_forbidden_tags(tags)
 
@@ -509,7 +519,7 @@ class Izba():
             # * create the folder
             driver.create_container(self, ctr_ctx, **opts)
             # * run the initial VM
-            driver.provision_container(self, ctr_ctx, spec, **opts)
+            driver.provision_container(self, ctr_ctx, spec, spec_dir=spec_dir, **opts)
             # * after provision, VM should be stopped
             if driver.container_is_running(self, ctr_ctx):
                 raise RuntimeError(f"Container {ctr_ctx.id.hex} still running after provision. Bug in driver?")
@@ -536,7 +546,7 @@ class Izba():
         return driver.stop_container(self, ctr_ctx, **opts)
 
 
-    def exec(self, container, user='user', command=None, stdin=None, **opts):
+    def exec(self, container, user=None, command=None, stdin=None, **opts):
         driver, ctr_ctx = self._container_from_path(self._resolve_container_path(container))
         return driver.exec_container(self, ctr_ctx, user=user, command=command, stdin=stdin, **opts)
 
@@ -568,14 +578,13 @@ class Izba():
         return True
 
 
-    def run(self, layer, name=None, user='user', command=None, stdin=None, remove=False, **opts):
-        '''create, start, exec and stop in one go (and rm when remove=True). Never builds.'''
+    def run(self, layer, name=None, user=None, command=None, stdin=None, remove=False, **opts):
+        '''create and driver.run_container (for most drivers start, exec, stop) in
+        one go, and rm when remove=True. Never builds.'''
         ctr_ctx = self.create(layer, name=name, **opts)
         driver, ctr_ctx = self._container_from_path(ctr_ctx.path)
         try:
-            driver.start_container(self, ctr_ctx, **opts)
-            driver.container_ready_wait(self, ctr_ctx)
-            return driver.exec_container(self, ctr_ctx, user=user, command=command, stdin=stdin, **opts)
+            return driver.run_container(self, ctr_ctx, user=user, command=command, stdin=stdin, **opts)
         finally:
             if driver.container_is_running(self, ctr_ctx):
                 driver.stop_container(self, ctr_ctx)

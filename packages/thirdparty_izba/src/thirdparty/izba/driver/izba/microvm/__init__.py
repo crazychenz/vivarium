@@ -205,6 +205,9 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
 
     def create_container(self, izba: "Izba", ctr_ctx: "ContainerContext", **opts: Any) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        if opts.get("volumes"):
+            raise NotImplementedError("microvm has no host bind mounts (volumes); the guest "
+                                      "sees the host only through the 9p share.")
         cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
         cqpath.make_dirs()
 
@@ -723,10 +726,11 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         return True
 
 
-    def exec_container(self, izba: "Izba", ctr_ctx: "ContainerContext", user: str = 'user',
+    def exec_container(self, izba: "Izba", ctr_ctx: "ContainerContext", user: Optional[str] = None,
                        command: Optional[Sequence[str]] = None, stdin: Any = None,
                        artifact_name: Optional[str] = None, **opts: Any) -> bool:
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        user = user or 'user'
 
         cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
         if not self.container_is_running(izba, ctr_ctx):

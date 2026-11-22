@@ -45,9 +45,15 @@ Every layer starts life as a container and becomes a layer by commit.
 ```
 
 `izba build` is `create_container` → `provision_container` → `commit_container`.
-`izba run` is `create_container` → `start_container` → `container_ready_wait` →
-`exec_container` → `stop_container`, followed by removal of the container
-with `--rm`.
+`izba run` is `create_container` → `run_container`, followed by removal of
+the container with `--rm`. The default `run_container` is `start_container` →
+`container_ready_wait` → `exec_container` → `stop_container`; a driver whose
+start already runs the workload (chroot_debian's entrypoint) overrides it.
+
+A build spec `from: {import: …}` reuses the newest parentless layer whose
+recorded source has the same `driver.import_source_key(source)`. The default
+key is `import` and `platform_arch`; drivers with more source options fill in
+their defaults there.
 
 ## Driver class attributes
 
@@ -440,8 +446,11 @@ Called by `Izba.run()`. `Izba.exec()` (`izba exec`) doesn't call it.
 ### exec_container
 
 ```python
-def exec_container(self, izba, ctr_ctx, user='user', command=None, stdin=None, **opts) -> bool
+def exec_container(self, izba, ctr_ctx, user=None, command=None, stdin=None, **opts) -> bool
 ```
+
+`user=None` means the driver's default user (`user` for microvm, the layer's
+`config.user` or `root` for chroot_debian).
 
 Runs a command in a running container and returns `True` if it exited 0.
 
@@ -566,6 +575,30 @@ driver.provision_container(izba, ctr_ctx, spec,
 # … commit, then for every container of the new layer:
 driver.start_container(izba, ctr_ctx, callbacks={"start_izba_qemu_cmd_cb": share_src})
 ```
+
+## The chroot_debian driver
+
+`chroot_debian` (`chroot/1` format) runs a Debian or Ubuntu root filesystem
+under `proot -0` as fake root: no root, no namespaces and no VM, only ptrace,
+as in `scripts/qemu-system-builder/run-rootless.sh`. If proot and mmdebstrap
+aren't installed, it unpacks them into `cache/tools/chroot_debian` with
+`apt-get download`.
+
+| Call | What it does |
+|---|---|
+| `import_container` | mmdebstrap (`chrootless`, `extract`) unpacks the base, dpkg configures it under proot. Source: `{import: ubuntu\|debian, suite, mirror, keyring, components, include, deb_src, platform_arch}` |
+| `create_container` | copies the layers into `rootfs/`, the root ancestor first (whiteouts, then `cp -a`), and saves a stat snapshot. `volumes=["host:/guest"]` (`-v`) are bound at start, run and exec |
+| `provision_container` | runs `provision.packages` and `provision.runcmd` as root with `provision.env`, the build context bound at `/context` (`provision.context`: another guest path, or `false`) and any `provision.binds`; stores `config.{env,workdir,user,entrypoint,cmd}` as inherited slots |
+| `commit_container` | keeps only what changed since create: unchanged files are pruned in place, deleted paths become whiteouts in `rootfs.json` (the `rootfs` chain slot) |
+| `start_container` | runs entrypoint + cmd in the background; output in `logs/console.log` |
+| `run_container` | runs entrypoint + (command or cmd) in the foreground, like `docker run` |
+| `exec_container` | runs a command, or `bash -l`, in the rootfs; no started container needed |
+| `container_ready_wait` | returns at once: there's no guest OS to boot |
+
+Build spec keys that only apply to a VM raise `NotImplementedError` with the
+reason: `boot`, `provision.hostname`, `provision.instance_prefix`, and so do
+`izba import --size` and a `platform_arch` other than the host's.
+`scripts/qemu-system-builder/Izbafile.yaml` is a complete example.
 
 ## Writing a driver
 

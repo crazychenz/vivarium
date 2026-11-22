@@ -59,18 +59,23 @@ def init_argparse():
     izba_import_parser.add_argument("--driver", default='microvm')
     izba_import_parser.add_argument("-t", "--tag", dest='tags', action="append", default=[])
     izba_import_parser.add_argument("--platform-arch", default=None, help="downloads key (default: linux-x64)")
+    izba_import_parser.add_argument("--suite", default=None, help="chroot_debian: distribution suite, e.g. noble")
     izba_import_parser.add_argument("--size", default=None, help="root disk size, e.g. 20G")
     izba_import_parser.add_argument("distro")
     izba_import_parser.set_defaults(func=izba_import_func)
 
-    # --- izba build [opts] [-f Izbafile.yaml]  # build a layer (create, provision, commit)
+    # --- izba build [opts] [-f Izbafile.yaml] [context]  # build a layer (create, provision, commit)
     izba_build_parser = izba_subparsers.add_parser("build")
-    izba_build_parser.add_argument("-f", "--file", dest='file', default=None, help="build spec (yaml)")
+    izba_build_parser.add_argument("-f", "--file", dest='file', default=None,
+                                   help="build spec (yaml); default: CONTEXT/Izbafile.yaml when a context is given")
     izba_build_parser.add_argument("--from", dest='from_', default=None, help="override spec 'from'")
     izba_build_parser.add_argument("--driver", default=None, help="override spec 'driver'")
     izba_build_parser.add_argument("-t", "--tag", "--tags", dest='tags', action="append", default=[])
     izba_build_parser.add_argument("--rm", dest='keep_failed', action="store_false", default=True,
                                    help="remove the container if the build fails")
+    izba_build_parser.add_argument("context", nargs="?", default=None,
+                                   help="folder relative host paths in the spec resolve against "
+                                        "(default: the spec's folder, else the current folder)")
     izba_build_parser.set_defaults(func=izba_build_func)
 
     # --- izba commit [opts] <container>     # turn a stopped container into a layer
@@ -82,10 +87,12 @@ def init_argparse():
     # --- izba create [opts] <layer>         # create a container from a layer
     izba_create_parser = izba_subparsers.add_parser("create")
     # unused
-    izba_run_parser.add_argument("-i", dest='stdin', action="store_true")
-    izba_run_parser.add_argument("-t", dest='tty', action="store_true")
+    izba_create_parser.add_argument("-i", dest='stdin', action="store_true")
+    izba_create_parser.add_argument("-t", dest='tty', action="store_true")
     # used
     izba_create_parser.add_argument("--name", dest='name', default=None)
+    izba_create_parser.add_argument("-v", "--volume", dest='volumes', action="append", default=[],
+                                    metavar="HOST:GUEST", help="bind a host path (drivers that support it)")
     izba_create_parser.add_argument("--driver", default=None)
     izba_create_parser.add_argument("layer")
     izba_create_parser.set_defaults(func=izba_create_func)
@@ -114,11 +121,11 @@ def init_argparse():
     # --- izba exec [opts] <container> [-- command]   # implicitly tty + stdin -> shell
     izba_exec_parser = izba_subparsers.add_parser("exec")
     # unused
-    izba_run_parser.add_argument("-i", dest='stdin', action="store_true")
-    izba_run_parser.add_argument("-t", dest='tty', action="store_true")
-    izba_run_parser.add_argument("-d", dest='tty', action="store_true")
+    izba_exec_parser.add_argument("-i", dest='stdin', action="store_true")
+    izba_exec_parser.add_argument("-t", dest='tty', action="store_true")
+    izba_exec_parser.add_argument("-d", dest='tty', action="store_true")
     # used
-    izba_exec_parser.add_argument("-u", dest='user', default='user')
+    izba_exec_parser.add_argument("-u", dest='user', default=None, help="default: the driver's")
     izba_exec_parser.add_argument("container")
     izba_exec_parser.set_defaults(func=izba_exec_func)
 
@@ -134,8 +141,10 @@ def init_argparse():
     izba_run_parser.add_argument("-t", dest='tty', action="store_true")
     izba_run_parser.add_argument("-d", dest='tty', action="store_true")
     # used
-    izba_run_parser.add_argument("-u", dest='user', default='user')
+    izba_run_parser.add_argument("-u", dest='user', default=None, help="default: the driver's")
     izba_run_parser.add_argument("--name", default=None)
+    izba_run_parser.add_argument("-v", "--volume", dest='volumes', action="append", default=[],
+                                 metavar="HOST:GUEST", help="bind a host path (drivers that support it)")
     izba_run_parser.add_argument("--rm", dest='remove', action="store_true", default=False,
                                  help="remove the container when the command exits")
     izba_run_parser.add_argument("layer")
@@ -199,22 +208,34 @@ def izba_import_func(args, config):
     source = {"import": args.distro}
     if args.platform_arch:
         source["platform_arch"] = args.platform_arch
+    if args.suite:
+        source["suite"] = args.suite
     opts = {"size": args.size} if args.size else {}
     Izba(config).import_(source, driver=args.driver, tags=args.tags, **opts)
 
 
 # Build a layer from a spec file (and/or --from/--driver).
 def izba_build_func(args, config):
+    from pathlib import Path
     spec = {}
-    if args.file:
+    spec_file = Path(args.file) if args.file else None
+    spec_dir = Path.cwd()
+    if args.context is not None:
+        spec_dir = Path(args.context).resolve()
+        if not spec_dir.is_dir():
+            raise NotADirectoryError(f"Build context {args.context!r} is not a folder.")
+        if spec_file is None and (spec_dir / "Izbafile.yaml").is_file():
+            spec_file = spec_dir / "Izbafile.yaml"
+    if spec_file is not None:
         import yaml
-        from pathlib import Path
-        spec = yaml.safe_load(Path(args.file).read_text()) or {}
+        spec = yaml.safe_load(spec_file.read_text()) or {}
+        if args.context is None:
+            spec_dir = spec_file.resolve().parent
     if args.from_:
         spec["from"] = args.from_
     if args.driver:
         spec["driver"] = args.driver
-    Izba(config).build(spec, tags=args.tags, keep_failed=args.keep_failed)
+    Izba(config).build(spec, tags=args.tags, keep_failed=args.keep_failed, spec_dir=spec_dir)
 
 
 def izba_commit_func(args, config):
@@ -227,14 +248,16 @@ def izba_rmi_func(args, config):
 
 def izba_run_func(args, config):
     from thirdparty.izba.subprocess import stdin_if_noninteractive
+    opts = {"volumes": args.volumes} if args.volumes else {}
     ok = Izba(config).run(args.layer, name=args.name, user=args.user, command=args.cmd,
-                          stdin=stdin_if_noninteractive(), remove=args.remove)
+                          stdin=stdin_if_noninteractive(), remove=args.remove, **opts)
     if not ok:
         exit(1)
 
 
 def izba_create_func(args, config):
-    ctr_ctx = Izba(config).create(args.layer, name=args.name, driver=args.driver)
+    opts = {"volumes": args.volumes} if args.volumes else {}
+    ctr_ctx = Izba(config).create(args.layer, name=args.name, driver=args.driver, **opts)
     print(ctr_ctx.id.hex)
 
 

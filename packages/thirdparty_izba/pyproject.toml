@@ -34,3 +34,4 @@ izba = "thirdparty.izba.cli:main"
 [project.entry-points."thirdparty_izba_drivers"]
 # Register crt (container runtime) as an izba driver
 microvm = "thirdparty.izba.driver.izba.microvm:register_driver_microvm"
+chroot_debian = "thirdparty.izba.driver.izba.chroot_debian:register_driver_chroot_debian"
