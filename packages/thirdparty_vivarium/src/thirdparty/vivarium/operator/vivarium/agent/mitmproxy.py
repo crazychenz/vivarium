@@ -133,25 +133,30 @@ class MitmProxy():
 
 
     def start(self, args=[]):
-        from thirdparty.izba.subprocess import run_background_process_logged
+        from thirdparty.izba.subprocess import run_host_process
         # TODO: Rotate mitmdump-console.log (currently only appends)
-        self.mitmdump_pid = run_background_process_logged(self.pidfile_fpath, ['mitmdump', *args], log_file=self.logfile_fpath)
+        self.mitmdump_pid = run_host_process(
+            ['mitmdump', *args],
+            stdout=self.logfile_fpath, stderr=self.logfile_fpath,
+            pidfile=self.pidfile_fpath, pidfile_owner=True,
+            detach=True,
+        ).pid
         log.info(f"Started mitmdump with pid {self.mitmdump_pid}")
         return self.mitmdump_pid
 
 
     def is_alive(self, prefix: str = "mitmdump") -> bool:
-        from thirdparty.izba.subprocess import read_pid, is_alive
+        from thirdparty.izba.subprocess import read_pid, is_pid_alive
         pid = read_pid(self.pidfile_fpath)
         if pid is None:
             return False
-        return is_alive(pid)
+        return is_pid_alive(pid)
     
     def kill(self):
-        from thirdparty.izba.subprocess import read_pid, pid_shutdown
+        from thirdparty.izba.subprocess import read_pid, kill_pid
         pid = read_pid(self.pidfile_fpath)
         if pid is None:
             return
         if self.is_alive():
-            pid_shutdown(pid)
+            kill_pid(pid, grace=5.0)
 

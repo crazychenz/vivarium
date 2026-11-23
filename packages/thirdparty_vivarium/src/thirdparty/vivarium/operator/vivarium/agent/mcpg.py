@@ -36,7 +36,7 @@ class McpGateway():
 
     def start(self, env={}):
         """Launch the gateway. `env` holds its EXEC_* settings; nothing else is inherited."""
-        from thirdparty.izba.subprocess import run_background_process_logged
+        from thirdparty.izba.subprocess import run_host_process
         # Otherwise wait_ready() would accept whatever is already listening.
         if self._port_in_use():
             raise RuntimeError(f"mcpg port {self.bind}:{self.port} is already in use")
@@ -49,12 +49,13 @@ class McpGateway():
         }
         # -I keeps this directory off sys.path, where mitmproxy.py would shadow the real package.
         # TODO: Rotate mcpg-console.log (currently only appends)
-        self.mcpg_pid = run_background_process_logged(
-            self.pidfile_fpath,
+        self.mcpg_pid = run_host_process(
             [sys.executable, '-I', str(self.script_fpath)],
-            log_file=self.logfile_fpath,
             env=full_env,
-        )
+            stdout=self.logfile_fpath, stderr=self.logfile_fpath,
+            pidfile=self.pidfile_fpath, pidfile_owner=True,
+            detach=True,
+        ).pid
         log.info(f"Started mcpg with pid {self.mcpg_pid}")
         return self.mcpg_pid
 
@@ -73,17 +74,17 @@ class McpGateway():
 
 
     def is_alive(self) -> bool:
-        from thirdparty.izba.subprocess import read_pid, is_alive
+        from thirdparty.izba.subprocess import read_pid, is_pid_alive
         pid = read_pid(self.pidfile_fpath)
         if pid is None:
             return False
-        return is_alive(pid)
+        return is_pid_alive(pid)
 
 
     def kill(self):
-        from thirdparty.izba.subprocess import read_pid, pid_shutdown
+        from thirdparty.izba.subprocess import read_pid, kill_pid
         pid = read_pid(self.pidfile_fpath)
         if pid is None:
             return
         if self.is_alive():
-            pid_shutdown(pid)
+            kill_pid(pid, grace=5.0)

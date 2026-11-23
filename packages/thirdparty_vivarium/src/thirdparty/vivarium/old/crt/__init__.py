@@ -264,6 +264,7 @@ class CrtBuilder():
             raise RuntimeError(f"qemu failed to start (rc={rc})")
 
         # Returns when qemu removes its pidfile / exits, or the console goes quiet.
+        # TODO: Use watch_host_process
         timed_out = tail_follow(self.path / log_fpath, self.path / pidfile_fpath, idle_timeout=idle_timeout)
         if timed_out:
             try:

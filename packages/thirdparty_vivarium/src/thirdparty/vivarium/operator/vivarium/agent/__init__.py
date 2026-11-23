@@ -76,19 +76,23 @@ class VivAgentOperator():
         # izba.stop()
         # izba.rm(force=True)
 
-        # TODO: izba agent VM with VivAgentIzbaOperator operator
-        # TODO: Put the container image in the seed for install.
-        if not (self.rig.izba_path / "images" / "by_name" / "agentvm").exists():
+        # TODO: build_vm() builds image and overlay. Just because image exists doesn't mean overlay does.
+        if not (self.rig.izba_path / "images" / "by_name" / "agentvm").resolve().exists():
             self.agentvm.build_vm()
+        
+        if not (self.rig.izba_path / "overlays" / "agentvm").exists():
+            self.agentvm.create_vm()
 
         # TODO: Consider: ssh user@remote 'podman run --rm "$(podman load -q | sed "s/^Loaded image[s]*: //")"' < image.tar
 
         # agent_izba.exec(user='user', command=['cat', '/etc/passwd']) #, stdin=try_stdin())
 
-        # TODO: izba enclosure VM with VivEnclosureIzbaOperator operator
-        # TODO: Put the container image in the seed for install.
-        if not (self.rig.izba_path / "images" / "by_name" / "enclosurevm").exists():
+        # TODO: build_vm() builds image and overlay. Just because image exists doesn't mean overlay does.
+        if not (self.rig.izba_path / "images" / "by_name" / "enclosurevm").resolve().exists():
             self.enclosurevm.build_vm()
+
+        if not (self.rig.izba_path / "overlays" / "enclosurevm").exists():
+            self.enclosurevm.create_vm()
 
 
     def run(self, **opts):

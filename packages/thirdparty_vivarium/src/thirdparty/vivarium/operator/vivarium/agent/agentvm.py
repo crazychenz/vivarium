@@ -12,9 +12,10 @@ from thirdparty.izba.config import load_izba_config
 
 class AgentVm():
     def __init__(self, operator):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         self.operator = operator
 
-        self._driver_name='crt'
+        self._driver_name='vivarium_agentvm'
         # Note: We need to create a new image so we don't have to match the hardware from crt.
         self._image_name='agentvm'
         self._overlay_name='agentvm'
@@ -26,6 +27,7 @@ class AgentVm():
 
 
     def inject_tunnel_network(self):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         # TODO: Until we enable the mitm path, this is useless.
         pass
         # def inject_tunnel_args(driver, izba, qemu_cmd):
@@ -67,6 +69,7 @@ class AgentVm():
 
 
     def _init_with_overlay(self):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         if hasattr(self, '_agent_izba'):
             return
 
@@ -77,7 +80,7 @@ class AgentVm():
 
 
     def build_vm(self):
-        
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         # izba_path not set until here for build (i.e. can't do it in __init__).
         self._izba_config = load_izba_config(user_config=self.operator.izba_config_overrides)
         self._agent_izba = Izba(self._izba_config)
@@ -97,11 +100,16 @@ class AgentVm():
         except:
             raise
 
-        # Unlikely because of OCI phase.
+
+    def create_vm(self):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        self._izba_config = load_izba_config(user_config=self.operator.izba_config_overrides)
+        self._agent_izba = Izba(self._izba_config)
+
         self._agent_izba.with_image(image=self._image_name)
 
         try:
-            self._agent_izba.create(name=self._overlay_name, network='slirp', user='user', exist_ok=True)
+            self._agent_izba.create(name=self._overlay_name, exist_ok=True)
             log.info("Created agent izba overlay.")
         except FileExistsError:
             pass
@@ -109,7 +117,9 @@ class AgentVm():
             raise
 
 
+
     def start_vm(self):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         self._init_with_overlay()
         # TODO: Verify its built?
 
@@ -139,6 +149,7 @@ class AgentVm():
         log.info("Agent VM started")
 
     def stop_vm(self):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         self._init_with_overlay()
 
         self.kill_mcp_tunnel()
@@ -146,8 +157,9 @@ class AgentVm():
         self._agent_izba.with_overlay(self._overlay_name).stop()
 
     def start_mcp_tunnel(self):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         """Expose the gateway inside the VM on 127.0.0.1:<mcpg port>."""
-        from thirdparty.izba.subprocess.ssh import start_reverse_tunnel
+        from thirdparty.izba.subprocess.ssh import ssh_reverse_tunnel
         self._init_with_overlay()
 
         if self.is_mcp_tunnel_alive():
@@ -155,7 +167,7 @@ class AgentVm():
             return
 
         mcpg = self.operator.mcpg
-        pid = start_reverse_tunnel(
+        pid = ssh_reverse_tunnel(
             self.mcp_tunnel_pidfile_fpath,
             listen=f"127.0.0.1:{mcpg.port}",
             target=f"{mcpg.bind}:{mcpg.port}",
@@ -166,25 +178,29 @@ class AgentVm():
         log.info(f"Started ssh mcp tunnel with pid {pid}")
 
     def is_mcp_tunnel_alive(self) -> bool:
-        from thirdparty.izba.subprocess import read_pid, is_alive, is_process_with_prefix
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        from thirdparty.izba.subprocess import read_pid, is_pid_alive, is_process_with_prefix
         pid = read_pid(self.mcp_tunnel_pidfile_fpath)
         if pid is None:
             return False
         # The prefix check keeps a stale pidfile from matching a recycled pid.
-        return is_alive(pid) and is_process_with_prefix(pid, "ssh")
+        return is_pid_alive(pid) and is_process_with_prefix(pid, "ssh")
 
     def kill_mcp_tunnel(self):
-        from thirdparty.izba.subprocess import read_pid, pid_shutdown
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        from thirdparty.izba.subprocess import read_pid, kill_pid
         if self.is_mcp_tunnel_alive():
-            pid_shutdown(read_pid(self.mcp_tunnel_pidfile_fpath))
+            kill_pid(read_pid(self.mcp_tunnel_pidfile_fpath), grace=5.0)
 
     def is_alive(self):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         self._init_with_overlay()
 
         izba = self._agent_izba
         return izba.driver.izba_is_running(izba, izba.overlay_path)
     
     def get_ssh_port(self):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         self._init_with_overlay()
         izba = self._agent_izba
 

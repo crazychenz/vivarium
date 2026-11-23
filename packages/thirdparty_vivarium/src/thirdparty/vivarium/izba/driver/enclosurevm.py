@@ -25,26 +25,24 @@ class IzbaVivariumEnclosureVmDriver(IzbaMicroVmDriver):
         super().__init__(**opts)
 
 
-    @staticmethod
-    def type_name():
-        return 'vivarium_enclosurevm'
-
-
-    # Download the base image we'll base golden and instance images from.
-    # Depends on cached target, internet, or available mirror.
-    def cache_izba_base(self, izba, base_os="ubuntu", **opts):
+    def import_container(self, izba, ctr_ctx, source, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().cache_izba_base(izba, base_os, **opts)
+        return super().import_container(izba, ctr_ctx, source, **opts)
 
 
-    def build_izba_data(self, izba, **opts):
+    def create_container(self, izba, ctr_ctx, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().build_izba_data(izba, **opts)
+        return super().create_container(izba, ctr_ctx, **opts)
 
 
-    def build_izba_init(self, izba, callbacks={}, **opts):
+    def build_izba_data(self, izba, ctr_ctx, spec, callbacks={}, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        super_ret = super().build_izba_init(izba, callbacks=callbacks, **opts)
+        return super().build_izba_data(izba, ctr_ctx, spec, callbacks=callbacks, **opts)
+
+
+    def build_izba_init(self, izba, ctr_ctx, spec, callbacks={}, **opts):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        super_ret = super().build_izba_init(izba, ctr_ctx, spec, callbacks=callbacks, **opts)
         if not super_ret:
             return super_ret
 
@@ -76,6 +74,16 @@ class IzbaVivariumEnclosureVmDriver(IzbaMicroVmDriver):
                 if "docker" not in user.groups:
                     user.groups.root.append("docker")
         
+        mount_9p = cc.Mount(["host", "/host", "9p", "", "0", "0"])
+        if self.cloud_init_user_data.mounts is None:
+            self.cloud_init_user_data.mounts = []
+        self.cloud_init_user_data.mounts.append(mount_9p)
+        self.cloud_init_user_data.runcmd.extend([
+            "mkdir -p /host",
+            "mount -a",
+            "true",
+        ])
+
         self.cloud_init_user_data.runcmd.extend([
             # enable container runtime daemon
             "systemctl enable --now docker containerd",
@@ -83,55 +91,48 @@ class IzbaVivariumEnclosureVmDriver(IzbaMicroVmDriver):
             "loginctl enable-linger user",
             "true",
         ])
+        return True
 
 
-    def build_izba_bundle(self, izba, **opts):
+    def build_izba_bundle(self, izba, ctr_ctx, spec, callbacks={}, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().build_izba_bundle(izba, **opts)
+        return super().build_izba_bundle(izba, ctr_ctx, spec, callbacks=callbacks, **opts)
 
 
-    # Runs the VM and shuts down when complete.
-    # Depends on: prepare_golden(), build_seed_image()
-    def build_izba(self, izba, callbacks={}, **opts):
+    # Boots to provision, then boots again and snapshots RAM.
+    def build_izba(self, izba, ctr_ctx, spec, callbacks={}, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().build_izba(izba, callbacks=callbacks, **opts)
+        return super().build_izba(izba, ctr_ctx, spec, callbacks=callbacks, **opts)
 
 
-    # Copy/adjust the golden to the instance
-    # Depends on: build_golden(self)
-    def create_izba_overlay(self, izba, **opts):
+    def commit_container(self, izba, ctr_ctx, layer_path, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().create_izba_overlay(izba, **opts)
+        return super().commit_container(izba, ctr_ctx, layer_path, **opts)
 
 
-    # Starts the VM and leaves running until kill or stop.
-    # Resumes the RAM/device state saved in images/origin-overlay.state (see
-    # build_base_disk_image) on top of a fresh overlay disk created by Izba.create().
-    def start_izba(self, izba, console='stdout', exist_ok=False, callbacks={}, **opts):
+    # Resumes the parent layer's RAM snapshot on first start, cold boots after.
+    def start_container(self, izba, ctr_ctx, exist_ok=False, callbacks={}, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().start_izba(izba, console=console, exist_ok=exist_ok, callbacks=callbacks, **opts)
+        return super().start_container(izba, ctr_ctx, exist_ok=exist_ok, callbacks=callbacks, **opts)
 
 
-    def izba_is_running(self, izba, overlay_path):
+    def container_is_running(self, izba, ctr_ctx):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().izba_is_running(izba, overlay_path)
+        return super().container_is_running(izba, ctr_ctx)
 
 
-    # Stops the VM.
-    def stop_izba(self, izba, **opts):
+    def stop_container(self, izba, ctr_ctx, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().stop_izba(izba, **opts)
+        return super().stop_container(izba, ctr_ctx, **opts)
 
 
     # Executes command in VM (via SSH)
-    def exec_izba_command(self, izba, user='user', command=None, stdin=None, artifact_name=None, **opts):
+    def exec_container(self, izba, ctr_ctx, user='user', command=None, stdin=None, artifact_name=None, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().exec_izba_command(izba, user=user, command=command, stdin=stdin, artifact_name=artifact_name, **opts)
+        return super().exec_container(izba, ctr_ctx, user=user, command=command, stdin=stdin, artifact_name=artifact_name, **opts)
 
 
-    def run_ready_wait(self, izba):
+    def container_ready_wait(self, izba, ctr_ctx, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().run_ready_wait(izba)
-
-
+        return super().container_ready_wait(izba, ctr_ctx, **opts)
 
