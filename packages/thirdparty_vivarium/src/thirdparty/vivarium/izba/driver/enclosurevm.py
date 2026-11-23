@@ -30,9 +30,31 @@ class IzbaVivariumEnclosureVmDriver(IzbaMicroVmDriver):
         return super().import_container(izba, ctr_ctx, source, **opts)
 
 
-    def create_container(self, izba, ctr_ctx, **opts):
+    # share_path: host folder behind the guest's /host (9p), default the
+    # container's mnt/. Recorded in container.yaml, so later starts keep it.
+    def create_container(self, izba, ctr_ctx, share_path=None, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        return super().create_container(izba, ctr_ctx, **opts)
+        ret = super().create_container(izba, ctr_ctx, **opts)
+        self._set_share_path(ctr_ctx, share_path)
+        return ret
+
+
+    def _set_share_path(self, ctr_ctx, share_path):
+        if share_path is None:
+            return
+        path = Path(share_path).resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        ctr_ctx.record["share_path"] = str(path)
+        ctr_ctx.save_record()
+
+
+    def _share_path(self, ctr_ctx, cqpath):
+        recorded = ctr_ctx.record.get("share_path")
+        if not recorded:
+            return super()._share_path(ctr_ctx, cqpath)
+        path = Path(recorded)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
 
     def build_izba_data(self, izba, ctr_ctx, spec, callbacks={}, **opts):
@@ -71,26 +93,28 @@ class IzbaVivariumEnclosureVmDriver(IzbaMicroVmDriver):
 
         for user in self.cloud_init_user_data.users:
             if user.name == 'user':
-                if "docker" not in user.groups:
+                # groups is a RootModel: test its list, not the model.
+                if user.groups is None:
+                    user.groups = ["docker"]
+                elif "docker" not in user.groups.root:
                     user.groups.root.append("docker")
         
-        mount_9p = cc.Mount(["host", "/host", "9p", "", "0", "0"])
+        # noauto: only the 9p device exists while building. qemu refuses to
+        # migrate (save the RAM snapshot) while the export is mounted, so it is
+        # mounted after start (`mount /host` as root, see mount_share()).
+        mount_9p = cc.Mount(["host", "/host", "9p", "noauto,nofail,trans=virtio,version=9p2000.L", "0", "0"])
         if self.cloud_init_user_data.mounts is None:
             self.cloud_init_user_data.mounts = []
         self.cloud_init_user_data.mounts.append(mount_9p)
-        self.cloud_init_user_data.runcmd.extend([
+        # Before the base config's trailing "true", which keeps runcmd's status clean.
+        runcmd = self.cloud_init_user_data.runcmd
+        runcmd[-1:-1] = [
             "mkdir -p /host",
-            "mount -a",
-            "true",
-        ])
-
-        self.cloud_init_user_data.runcmd.extend([
             # enable container runtime daemon
             "systemctl enable --now docker containerd",
             # enable per-user service manager
             "loginctl enable-linger user",
-            "true",
-        ])
+        ]
         return True
 
 
@@ -111,9 +135,18 @@ class IzbaVivariumEnclosureVmDriver(IzbaMicroVmDriver):
 
 
     # Resumes the parent layer's RAM snapshot on first start, cold boots after.
-    def start_container(self, izba, ctr_ctx, exist_ok=False, callbacks={}, **opts):
+    def start_container(self, izba, ctr_ctx, exist_ok=False, callbacks={}, share_path=None, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        self._set_share_path(ctr_ctx, share_path)
         return super().start_container(izba, ctr_ctx, exist_ok=exist_ok, callbacks=callbacks, **opts)
+
+
+    # Mount the 9p share at /host in a running (ready) container. Idempotent.
+    def mount_share(self, izba, ctr_ctx):
+        log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        if not self.exec_container(izba, ctr_ctx, user='root', command=['mountpoint -q /host || mount /host']):
+            raise RuntimeError(f"Mounting /host in {ctr_ctx.id.hex} failed")
+        return True
 
 
     def container_is_running(self, izba, ctr_ctx):

@@ -145,15 +145,18 @@ def viv_rig_inspect_func(args, config):
 def viv_rig_izba_func(args, config):
     log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
     import os
-    import subprocess
+    from thirdparty.izba.subprocess import run_host_process
     rig = Rig(config).with_rig(args.rig)
     env = os.environ.copy()
-    env["IZBA_BASE_PATH"] = rig.rig_path / "izba"
-    try:
-        subprocess.run(["izba", *args.izba_args], env=env, check=True)
-    except subprocess.CalledProcessError as e:
-        log.error(e)
-        exit(1)
+    # Same locations as the agent operator's izba_config_overrides: containers
+    # per rig, layers and downloads in the shared vivarium cache.
+    env["IZBA_BASE_PATH"] = str(rig.izba_path)
+    env["IZBA_CACHE_PATH"] = str(rig.cache_path)
+    # stdin=None: inherit ours, so `viv rig izba <rig> exec ...` stays interactive.
+    rc = run_host_process(["izba", *args.izba_args], env=env, stdin=None).wait()
+    if rc != 0:
+        log.error(f"izba exited with {rc}")
+        exit(rc)
 
 
 def main():

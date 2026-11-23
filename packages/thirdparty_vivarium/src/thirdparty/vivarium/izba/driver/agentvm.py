@@ -71,26 +71,20 @@ class IzbaVivariumAgentVmDriver(IzbaMicroVmDriver):
 
         for user in self.cloud_init_user_data.users:
             if user.name == 'user':
-                if "docker" not in user.groups:
+                # groups is a RootModel: test its list, not the model.
+                if user.groups is None:
+                    user.groups = ["docker"]
+                elif "docker" not in user.groups.root:
                     user.groups.root.append("docker")
         
-        mount_9p = cc.Mount(["host", "/host", "9p", "", "0", "0"])
-        if self.cloud_init_user_data.mounts is None:
-            self.cloud_init_user_data.mounts = []
-        self.cloud_init_user_data.mounts.append(mount_9p)
-        self.cloud_init_user_data.runcmd.extend([
-            "mkdir -p /host",
-            "mount -a",
-            "true",
-        ])
-
-        self.cloud_init_user_data.runcmd.extend([
+        # Before the base config's trailing "true", which keeps runcmd's status clean.
+        runcmd = self.cloud_init_user_data.runcmd
+        runcmd[-1:-1] = [
             # enable container runtime daemon
             "systemctl enable --now docker containerd",
             # enable per-user service manager
             "loginctl enable-linger user",
-            "true",
-        ])
+        ]
         return True
 
 

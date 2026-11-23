@@ -4,45 +4,39 @@ import sys
 import logging
 log = logging.getLogger(__name__)
 
-class AgentOciBuilder():
+from thirdparty.vivarium.operator.vivarium.agent.izbavm import IzbaVm
+
+
+# Same packages as izba's docs/examples/crt-Izbafile.yaml.
+CRT_PACKAGES = [
+    "docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin",
+    "podman", "uidmap", "slirp4netns", "fuse-overlayfs", "passt",
+]
+
+
+class CrtVm(IzbaVm):
+    '''Container runtime microvm that builds OCI images and hands them back
+    through a sparse raw disk (images/oci.tar in the izba container folder).'''
+
+    driver_name = 'microvm'
+    # Not "crt": that tag is used by izba's crt example, built without the oci_tar disk,
+    # and the disk must be present when the layer's RAM snapshot is taken.
+    layer_name = 'vivarium-crt'
+    container_name = 'crt'
+
     def __init__(self, operator):
-        self.operator = operator
+        super().__init__(operator, "agent")
 
-    def _init_oci_builder(self):
-        # --- TODO: izba agent container image with crt ---
+        def inject_sparse_device(driver, izba, ctr_ctx, qemu_cmd):
+            oci_tar_fpath = ctr_ctx.path / "images" / "oci.tar"
+            from thirdparty.izba.io import make_file_sparse
+            make_file_sparse(oci_tar_fpath)
 
-        # TODO: How do we set the izba config file as a viv operator configuration?
-        from thirdparty.izba.config import load_izba_config
-        izba_config = load_izba_config(user_config=self.operator.izba_config_overrides)
-        #izba_config = load_izba_config(user_config={"base_path": self.operator.rig.izba_path})
+            import thirdparty.qemu.qapi as qapi
+            qemu_cmd._obj.drives.append(qapi.Drive(id="oci_tar", file=oci_tar_fpath, format="raw", interface="none"))
+            qemu_cmd._obj.devices.append(qapi.VirtioBlk(drive="oci_tar", serial="oci_tar"))
 
-        import io
-        from thirdparty.izba import Izba
-        driver_name='crt'
-        image_name='crt'
-        overlay_name='crt'
-        self.crt_izba = Izba(izba_config)
-        self.crt_izba.with_driver(driver=driver_name)
-
-        oci_tar_fpath = None
-        # Callback that will attach sparse drive/device to qemu on build-origin and start.
-
-        def inject_sparse_device(is_overlay=False):
-            def _inject_sparse_device(driver, izba, qemu_cmd):
-                if is_overlay:
-                    oci_tar_fpath = izba.overlay_path / "images" / "oci.tar"
-                else:
-                    oci_tar_fpath = izba.build_path / "images" / "oci.tar"
-                from thirdparty.izba.io import make_file_sparse
-                make_file_sparse(oci_tar_fpath)
-
-                import thirdparty.qemu.qapi as qapi
-                qemu_cmd._obj.drives.append(qapi.Drive(id="oci_tar", file=oci_tar_fpath, format="raw", interface="none"))
-                qemu_cmd._obj.devices.append(qapi.VirtioBlk(drive="oci_tar", serial="oci_tar"))
-                return qemu_cmd._obj
-            return _inject_sparse_device
-
-        def inject_user_disk_permission(driver, izba, cc):
+        def inject_user_disk_permission(driver, izba, ctr_ctx, cc):
             for user in cc.users:
                 if user.name == "user":
                     if not user.groups:
@@ -51,25 +45,44 @@ class AgentOciBuilder():
                         user.groups.root.append("disk")
             return cc
 
-        callbacks = {
-            #'build_izba_base_qemu_cmd_cb': inject_sparse_device,
-            'build_izba_origin_qemu_cmd_cb': inject_sparse_device(is_overlay=False),
-            'start_izba_qemu_cmd_cb': inject_sparse_device(is_overlay=True),
+        # The snapshot boot and start must attach the same devices (RAM snapshot).
+        self.callbacks = {
+            'build_izba_provision_qemu_cmd_cb': inject_sparse_device,
+            'build_izba_snapshot_qemu_cmd_cb': inject_sparse_device,
+            'start_izba_qemu_cmd_cb': inject_sparse_device,
             'build_izba_init_cloud_config_cb': inject_user_disk_permission,
         }
 
-        try:
-            self.crt_izba.build(tags=[image_name], exist_ok=True, callbacks=callbacks)
-            self.crt_izba.with_image(image=image_name)
-            self.crt_izba.create(name=overlay_name, network='slirp', user='user', exist_ok=True)
-            self.crt_izba.with_overlay(overlay_name)
-            self.crt_izba.start(exist_ok=True, callbacks=callbacks)
-        except FileExistsError:
-            print("HERE")
-            pass
-        except:
-            print("THERE")
-            raise
+
+    def build_spec(self):
+        return {
+            **super().build_spec(),
+            "provision": {
+                "instance_prefix": "crt",
+                "packages": CRT_PACKAGES,
+                "runcmd": [
+                    "systemctl enable --now docker containerd",
+                    "loginctl enable-linger user",
+                ],
+            },
+        }
+
+
+    @property
+    def oci_tar_fpath(self):
+        return self.container_path / "images" / "oci.tar"
+
+
+class AgentOciBuilder():
+    def __init__(self, operator):
+        self.operator = operator
+
+    def _init_oci_builder(self):
+        self.crt = CrtVm(self.operator)
+        self.crt.build_vm()
+        self.crt.create_vm()
+        self.crt.start_vm()
+        self.crt.wait_ready()
 
     def build_agent_oci_image(self, dest_oci_fpath):
         self._init_oci_builder()
@@ -77,24 +90,22 @@ class AgentOciBuilder():
         # Build the container image.
         import io
         agent_dockerfile_bytes = io.BytesIO(_build_agent_dockerfile().render().encode("utf-8"))
-        self.crt_izba.exec(
-            user='user',
-            command=['docker', 'build', '-t', 'agent', '-f', '-', '.'],
+        self.crt.exec(
+            ['docker', 'build', '-t', 'agent', '-f', '-', '.'],
             stdin=agent_dockerfile_bytes,
-            artifact_name='docker_build_agent_oci'
+            artifact_name='docker_build_agent_oci',
         )
 
         # Export the container image via raw device.
         #* This only works because its made into a single string argument for ssh underneath.
         # Alternative: podman save --format docker-archive -o "$out" "$tag"
-        self.crt_izba.exec(
-            user='user',
-            command=['docker', 'save', 'agent', '>', r"$(grep -lx oci_tar /sys/block/vd*/serial 2>/dev/null | sed -n 's|^/sys/block/\(vd[^/]*\)/serial$|/dev/\1|p' | tail -n1)"],
-            artifact_name='docker_save_agent_oci'
+        self.crt.exec(
+            ['docker', 'save', 'agent', '>', r"$(grep -lx oci_tar /sys/block/vd*/serial 2>/dev/null | sed -n 's|^/sys/block/\(vd[^/]*\)/serial$|/dev/\1|p' | tail -n1)"],
+            artifact_name='docker_save_agent_oci',
         )
 
         # Copy real tarfile from sparse file and wipe sparse file
-        sparse_fpath = self.crt_izba.overlay_path / "images" / "oci.tar"
+        sparse_fpath = self.crt.oci_tar_fpath
         from thirdparty.izba.io import make_file_sparse, copy_tar_from_sparse_file
         copy_tar_from_sparse_file(sparse_fpath, dest_oci_fpath)
         make_file_sparse(sparse_fpath)

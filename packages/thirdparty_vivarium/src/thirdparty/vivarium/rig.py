@@ -57,8 +57,13 @@ class Rig():
     def ls(self):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
 
+        # No rigs built yet (rigs folder is created by the first build).
+        if not self.rigs_path.is_dir():
+            log.info(f"No rigs folder at {self.rigs_path}")
+            return
+
         # TODO: Cheap stop gap
-        for rig_entry in self.rigs_path.iterdir():
+        for rig_entry in sorted(self.rigs_path.iterdir()):
             if rig_entry.is_dir():
                 print(f"{rig_entry.name}")
     

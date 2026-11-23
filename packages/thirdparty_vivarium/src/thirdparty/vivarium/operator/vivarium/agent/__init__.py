@@ -76,23 +76,14 @@ class VivAgentOperator():
         # izba.stop()
         # izba.rm(force=True)
 
-        # TODO: build_vm() builds image and overlay. Just because image exists doesn't mean overlay does.
-        if not (self.rig.izba_path / "images" / "by_name" / "agentvm").resolve().exists():
-            self.agentvm.build_vm()
-        
-        if not (self.rig.izba_path / "overlays" / "agentvm").exists():
-            self.agentvm.create_vm()
+        # Both are no-ops when the layer / container already exists.
+        self.agentvm.build_vm()
+        self.agentvm.create_vm()
 
         # TODO: Consider: ssh user@remote 'podman run --rm "$(podman load -q | sed "s/^Loaded image[s]*: //")"' < image.tar
 
-        # agent_izba.exec(user='user', command=['cat', '/etc/passwd']) #, stdin=try_stdin())
-
-        # TODO: build_vm() builds image and overlay. Just because image exists doesn't mean overlay does.
-        if not (self.rig.izba_path / "images" / "by_name" / "enclosurevm").resolve().exists():
-            self.enclosurevm.build_vm()
-
-        if not (self.rig.izba_path / "overlays" / "enclosurevm").exists():
-            self.enclosurevm.create_vm()
+        self.enclosurevm.build_vm()
+        self.enclosurevm.create_vm()
 
 
     def run(self, **opts):
@@ -112,10 +103,11 @@ class VivAgentOperator():
             log.info(f"mitmproxy already running")
 
         if not self.wgbridge.is_alive():
+            # The agent VM's dgram "tunnel" netdev (created by the izba microvm driver).
+            tun_qemu, tun_bridge = self.agentvm.tunnel_socket_paths()
             self.wgbridge.start(args=[
-                "-socket", str(self.wgbridge.path / "run" / "tun_bridge.sock"),
-                # TODO: Use the real overlay_path from izba object
-                "-peer", str(self.wgbridge.path / "run" / "tun_qemu.sock"),
+                "-socket", str(tun_bridge),
+                "-peer", str(tun_qemu),
                 "-conf", str(self.mitm.config_fpath.parent / "wireguard.conf"),
                 "-endpoint", "127.0.0.1:51820",
                 "-guest-ip", "10.0.0.1",
