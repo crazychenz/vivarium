@@ -16,10 +16,13 @@ class IzbaVm():
     layer_name = None
     container_name = None
 
-    def __init__(self, operator, folder):
+    def __init__(self, operator, folder, share_path=None):
         self.operator = operator
         # Host side artifacts of this VM that are not part of izba.
         self.path = operator.rig.rig_path / folder
+        # Host folder seen by the guest as /host (9p); None: no share handling
+        # (the driver must mix in thirdparty.vivarium.izba.driver.share.HostShareMixin).
+        self.share_path = share_path
         self.callbacks = {}
         self._izba = None
 
@@ -74,13 +77,23 @@ class IzbaVm():
         if self.has_container():
             log.info(f"Container {self.container_name} already exists.")
             return
+        if self.share_path is not None:
+            opts.setdefault("share_path", self.share_path)
         self.izba.create(self.layer_name, name=self.container_name, **opts)
         log.info(f"Created container {self.container_name}.")
 
 
     def start_vm(self, **opts):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
+        if self.share_path is not None:
+            # Passed again so containers created without share_path pick it up.
+            opts.setdefault("share_path", self.share_path)
         self.izba.start(self.container_name, exist_ok=True, callbacks=self.callbacks, **opts)
+        if self.share_path is not None:
+            self.wait_ready()
+            # Only after start: qemu can't save/migrate the VM while the share is mounted.
+            driver, ctr_ctx = self.izba.container(self.container_name)
+            driver.mount_share(self.izba, ctr_ctx)
 
 
     def stop_vm(self):

@@ -15,21 +15,11 @@ class EnclosureVm(IzbaVm):
 
     def __init__(self, operator):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        super().__init__(operator, "enclosure")
-        # Host folder seen by the enclosure as /host (9p).
-        self.share_path = self.path / "mnt"
-
-
-    def create_vm(self):
-        super().create_vm(share_path=self.share_path)
+        path = operator.rig.rig_path / "enclosure"
+        super().__init__(operator, "enclosure", share_path=path / "mnt")
 
 
     def start_vm(self):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        # Passed again so containers created before share_path existed pick it up.
-        super().start_vm(share_path=self.share_path)
-        self.wait_ready()
-        # Only now: qemu can't save/migrate the VM while the share is mounted.
-        driver, ctr_ctx = self.izba.container(self.container_name)
-        driver.mount_share(self.izba, ctr_ctx)
+        super().start_vm()
         log.info("Enclosure VM started")

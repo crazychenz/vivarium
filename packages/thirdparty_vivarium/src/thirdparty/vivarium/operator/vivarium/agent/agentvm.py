@@ -15,7 +15,10 @@ class AgentVm(IzbaVm):
 
     def __init__(self, operator):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
-        super().__init__(operator, "agent")
+        path = operator.rig.rig_path / "agent"
+        # /host in the guest: where the agent's configuration is injected
+        # when it isn't embedded in the VM.
+        super().__init__(operator, "agent", share_path=path / "mnt")
 
         # TODO: Consider using a real socket_path?
         self.mcp_tunnel_pidfile_fpath = self.path / "run" / "ssh-mcp-tunnel.pid"
@@ -53,9 +56,8 @@ class AgentVm(IzbaVm):
     def start_vm(self):
         log.debug(f"--- {sys._getframe().f_code.co_qualname} ---")
         self.inject_tunnel_network()
+        # Waits for ssh and mounts /host.
         super().start_vm()
-        # A cold boot (any start after the first) needs a moment for sshd.
-        self.wait_ready()
 
         # TODO: Import the container image.
         with open(self.path / "agent-oci.tar", "rb") as agent_oci:

@@ -13,6 +13,7 @@ log = logging.getLogger(__name__)
 from pathlib import Path
 
 from thirdparty.izba.driver.izba.microvm import IzbaMicroVmDriver
+from thirdparty.vivarium.izba.driver.share import HostShareMixin
 
 from thirdparty.izba.driver import DriverIndex
 def register_driver_vivarium_agentvm(driver_index: DriverIndex):
@@ -20,7 +21,7 @@ def register_driver_vivarium_agentvm(driver_index: DriverIndex):
 
 
 # TODO: Add BaseDriver base class.
-class IzbaVivariumAgentVmDriver(IzbaMicroVmDriver):
+class IzbaVivariumAgentVmDriver(HostShareMixin, IzbaMicroVmDriver):
     def __init__(self, **opts):
         super().__init__(**opts)
 
@@ -77,6 +78,9 @@ class IzbaVivariumAgentVmDriver(IzbaMicroVmDriver):
                 elif "docker" not in user.groups.root:
                     user.groups.root.append("docker")
         
+        # Where the agent's configuration is injected when not embedded in the VM.
+        self._add_share_mount(self.cloud_init_user_data)
+
         # Before the base config's trailing "true", which keeps runcmd's status clean.
         runcmd = self.cloud_init_user_data.runcmd
         runcmd[-1:-1] = [
