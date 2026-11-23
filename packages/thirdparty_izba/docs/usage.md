@@ -147,7 +147,7 @@ ID.
 ```yaml
 from: devbox                  # parent: a tag, layer ID or ID prefix
                               # or: from: {import: ubuntu, platform_arch: linux-x64}
-driver: crt                   # optional; defaults to the parent's driver
+driver: microvm               # optional; defaults to the parent's driver
 tags: [devbox-docker]         # optional
 boot:                         # optional
   root: LABEL=cloudimg-rootfs #   root filesystem (normally inherited, rarely needed)
@@ -178,7 +178,7 @@ izba build -f Izbafile.yaml                      # tags come from the spec
 izba build -f Izbafile.yaml -t devbox -t latest  # plus extra tags
 izba build ./ctx                                 # ./ctx/Izbafile.yaml, paths relative to ./ctx
 izba build -f examples/x.yaml ./ctx              # any spec, paths relative to ./ctx
-izba build --from devbox -t devbox-crt --driver crt
+izba build --from devbox -t devbox-agent --driver vivarium_agentvm
 ```
 
 The optional context folder is what relative host paths in the spec (such as
@@ -383,16 +383,19 @@ from drivers with the same on-disk format can be stacked on each other.
 | Driver | What it adds |
 |---|---|
 | `microvm` | The base: an Ubuntu qemu microvm, with SSH access for `user` and `root`. |
-| `crt` | Docker and Podman (rootless) installed and enabled for `user`. |
 | `vivarium_agentvm`, `vivarium_enclosurevm` | Vivarium environments, installed with the vivarium package. |
 | `chroot_debian` | Not a VM: a Debian/Ubuntu rootfs run under proot as fake root (`chroot/1` format, see [drivers.md](drivers.md#the-chroot_debian-driver)). |
 
-The first four share the `microvm/1` format, so you can, for example, build a `crt`
-layer on a plain `microvm` layer:
+`microvm` and the vivarium drivers share the `microvm/1` format, so you can, for
+example, build a `vivarium_agentvm` layer on a plain `microvm` layer:
 
 ```sh
-izba build --from devbox --driver crt -t devbox-crt
+izba build --from devbox --driver vivarium_agentvm -t devbox-agent
 ```
+
+A container runtime (Docker and rootless Podman for `user`) is not a driver but a
+`microvm` build spec: see [examples/crt.md](examples/crt.md) and
+[examples/crt-Izbafile.yaml](examples/crt-Izbafile.yaml).
 
 ## Troubleshooting
 

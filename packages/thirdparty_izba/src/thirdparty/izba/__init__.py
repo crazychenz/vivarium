@@ -253,6 +253,12 @@ class Izba():
         return Layer.load(self._resolve_layer_path(alias))
 
 
+    def container(self, alias):
+        '''(driver, ContainerContext) of an existing container by id/name.
+        FileNotFoundError if there is none.'''
+        return self._container_from_path(self._resolve_container_path(alias))
+
+
     def _container_from_path(self, container_path):
         '''(driver, ContainerContext) of an existing container folder.'''
         import yaml

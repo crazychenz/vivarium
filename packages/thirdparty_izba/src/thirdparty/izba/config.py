@@ -193,7 +193,6 @@ def resolve_socket_base_path(config=None, uid=None) -> Path:
     import os
     import stat
     import tempfile
-    from pathlib import Path
 
     SUN_PATH_MAX = 107
 

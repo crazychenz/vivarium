@@ -78,7 +78,7 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
 
 ### `name`
 
-The name the driver was registered under, such as `crt` or `vivarium_agentvm`.
+The name the driver was registered under, such as `microvm` or `vivarium_agentvm`.
 `DriverIndex.create()` sets it on each instance, so drivers don't define it and
 subclasses never inherit a parent's name. Izba records it as `driver:` in
 `container.yaml` and `layer.yaml`.
@@ -86,7 +86,7 @@ subclasses never inherit a parent's name. Izba records it as `driver:` in
 ### `layer_format`
 
 The compatibility key. A container can only be created from a layer with the
-same `layer_format`, so `crt`, `vivarium_agentvm` and `vivarium_enclosurevm`,
+same `layer_format`, so `microvm`, `vivarium_agentvm` and `vivarium_enclosurevm`,
 which all keep microvm's on-disk layout, share `microvm/1` and can build on
 each other's layers. Bump the version suffix when the layout changes.
 
@@ -632,6 +632,6 @@ devbox = "mypkg.driver:register_driver_devbox"
 
 After reinstalling the package, `izba build --from ubuntu-base --driver devbox`
 works. Because `devbox` keeps the `microvm/1` format, it can build on layers
-made by `microvm`, `crt` or the vivarium drivers, and they can build on its
+made by `microvm` or the vivarium drivers, and they can build on its
 layers. A driver plugin that fails to import is skipped with a warning; it
 doesn't break other commands.

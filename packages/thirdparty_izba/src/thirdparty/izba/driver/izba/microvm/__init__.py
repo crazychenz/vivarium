@@ -128,7 +128,7 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         # TODO: This tunnel is only for agent.
         qemu_cmd.add_dgram_netdev(cqpath.tun_qemu, cqpath.tun_bridge)
         # TODO: This 9p share is only for enclosurevm
-        qemu_cmd.add_9p_share(cqpath.mnt, mount_tag="host")
+        qemu_cmd.add_9p_share(self._share_path(ctr_ctx, cqpath), mount_tag="host")
         if incoming is not None:
             qemu_cmd.set_incoming(incoming)
         #qemu_cmd.sandbox()
@@ -136,6 +136,14 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         if qemu_cmd_cb:
             qemu_cmd_cb(self, izba, ctr_ctx, qemu_cmd)
         return qemu_cmd
+
+
+    def _share_path(self, ctr_ctx: "ContainerContext", cqpath: CommonQemuPaths) -> Path:
+        '''Host folder behind the "host" 9p share. The device is part of the RAM
+        snapshot, the folder is not, so drivers may pick a different one per
+        container. The guest must not mount the share before the snapshot is
+        saved: qemu refuses to migrate while a 9p export is attached.'''
+        return cqpath.mnt
 
 
     def _ssh_conn(self, ctr_ctx: "ContainerContext", cqpath: CommonQemuPaths,
@@ -625,6 +633,9 @@ class IzbaMicroVmDriver(IzbaAbstractBaseDriver):
         from thirdparty.izba.subprocess import read_pid, is_pid_alive
 
         cqpath = CommonQemuPaths(ctr_ctx.path, ctr_ctx.socket_path)
+        # The socket folder lives in XDG_RUNTIME_DIR, so it is gone after a
+        # reboot or logout since the container was created.
+        cqpath.socket_path.mkdir(mode=0o700, parents=True, exist_ok=True)
 
         pid = read_pid(cqpath.pidfile)
         if pid is not None and self.container_is_running(izba, ctr_ctx):
