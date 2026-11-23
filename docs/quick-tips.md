@@ -16,10 +16,12 @@ viv rig izba agentrig exec enclosurevm
 # Access the claude code in the container.
 viv rig izba agentrig exec agentvm -- docker attach agent
 
+# Rebuild AgentVM
+viv rig izba agentrig stop agentvm ; viv rig izba agentrig rm agentvm ; viv rig izba agentrig rmi agentvm
+
 # Rebuild EnclosureVM
-viv rig izba agentrig stop enclosurevm
-viv rig izba agentrig rm enclosurevm
-viv rig izba agentrig rmi enclosurevm
+viv rig izba agentrig stop enclosurevm ; viv rig izba agentrig rm enclosurevm ; viv rig izba agentrig rmi enclosurevm
+
 viv rig build --name agentrig agent
 viv rig run agentrig
 ```
